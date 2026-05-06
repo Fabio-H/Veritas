@@ -1,0 +1,38 @@
+[project]
+name = "ps-deobfuscator"
+version = "0.1.0"
+description = "Recursive PowerShell-oriented payload deobfuscator (URL, Hex, Base64, GZIP)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+gui = [
+  "PySide6>=6.6.0",
+]
+dev = [
+  "pillow>=10.0.0",
+]
+build = [
+  "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+ps-deobfuscator = "ps_deobfuscator.cli:main"
+ps-deobfuscator-gui = "main_gui:run_app"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main_gui"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ps_deobfuscator*", "gui*"]
+
+[tool.setuptools.package-data]
+gui = ["resources/*.svg", "resources/*.ico"]

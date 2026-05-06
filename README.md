@@ -1,16 +1,16 @@
-<!-- Logo: adicione aqui uma imagem quando disponível, ex.: ![Veritas](docs/logo.png) -->
+
 
 # Veritas
 
 ### Decodificador automático de payloads ofuscados para SOC, IR e Blue Team
 
-> **Veritas** revela o que está escondido em comandos PowerShell e strings codificadas — direto no navegador, sem instalar runtime extra.
+> **Veritas** revela o que está escondido em comandos PowerShell e strings codificadas. O foco atual é o app desktop Windows em Python/PySide6; a versão web standalone continua disponível em `web/`.
 
-[![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML)
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES2020+-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)](https://github.com)
+[HTML5](https://developer.mozilla.org/docs/Web/HTML)
+[JavaScript](https://developer.mozilla.org/docs/Web/JavaScript)
+[Tailwind CSS](https://tailwindcss.com/)
+[License](LICENSE)
+[Status](https://github.com)
 
 ---
 
@@ -30,13 +30,31 @@ O nome é um trocadilho com a ideia de extrair a **verdade** do que o atacante t
 - **Detecção de formatos** — tentativas automáticas para **URL encoding**, **Hex**, **Base64** (incluindo variantes com **UTF-8**, **UTF-16LE** e **GZIP** quando o *magic* `1F 8B` estiver presente).
 - **Pontuação heurística** — escolha da “melhor” transformação por camada com base em palavras-chave e legibilidade do texto.
 - **Extração de IoCs** — IPv4/IPv6, URLs, domínios (com heurísticas para não confundir FQDN com namespaces .NET), e-mails, hashes (MD5/SHA1/SHA256) e padrões PowerShell marcados para análise.
-- **Interface web** — uma única página HTML (`payload-deobfuscator.html`) com **Tailwind CSS** via CDN; roda localmente no navegador.
+- **Interface web** — uma única página HTML em [`web/payload-deobfuscator.html`](web/payload-deobfuscator.html) com **Tailwind CSS** via CDN; roda localmente no navegador.
+- **Interface desktop (Python / Qt)** — projeto em [`ps-deobfuscator/`](ps-deobfuscator/); após o build, atalho na raiz: **`Veritas GUI.bat`** → `release/ps-deobfuscator-gui/`.
 
 ---
 
-## Pré-requisitos e instalação
+## App desktop Windows
 
-Não há **servidor obrigatório** nem **Node.js** para o modo básico: basta um navegador moderno.
+O app principal fica em [`ps-deobfuscator/`](ps-deobfuscator/) e pode ser executado a partir do código-fonte ou empacotado como bundle Windows.
+
+```powershell
+cd ps-deobfuscator
+pip install -e ".[gui,dev,build]"
+python -m unittest discover -s tests
+python scripts\build_exe.py
+```
+
+Saídas principais:
+
+- `release/ps-deobfuscator-gui/ps-deobfuscator-gui.exe` — executável de acesso fácil.
+- `release/Veritas-vX.Y.Z-windows.zip` — pacote versionado para distribuição.
+- `Veritas GUI.bat` — launcher na raiz do projeto.
+
+## Interface web standalone
+
+Não há **servidor obrigatório** nem **Node.js** para o modo web: basta um navegador moderno.
 
 ### Clonar o repositório
 
@@ -50,23 +68,25 @@ Substitua `SEU_USUARIO` pelo seu usuário ou organização no GitHub.
 ### Executar localmente
 
 1. Abra o arquivo principal no navegador:
-   - **Windows:** clique duas vezes em `payload-deobfuscator.html` **ou** arraste o arquivo para uma janela do Chrome/Edge/Firefox.
-   - **Linha de comando (opcional):**
+  - **Windows:** clique duas vezes em `web/payload-deobfuscator.html` **ou** arraste o arquivo para uma janela do Chrome/Edge/Firefox.
+  - **Linha de comando (opcional):**
 
 ```bash
 # Exemplo com Python (módulo http embutido)
 python -m http.server 8080
-# Acesse: http://localhost:8080/payload-deobfuscator.html
+# Acesse: http://localhost:8080/web/payload-deobfuscator.html
 ```
 
-2. **Conectividade:** a página carrega **Tailwind CSS** da CDN; sem internet, o estilo pode não aplicar — o núcleo JavaScript continua no arquivo.
+1. **Conectividade:** a página carrega **Tailwind CSS** da CDN; sem internet, o estilo pode não aplicar — o núcleo JavaScript continua no arquivo.
 
-### Dependências
+### Dependências web
 
-| Dependência | Uso |
-|-------------|-----|
+
+| Dependência       | Uso                                                      |
+| ----------------- | -------------------------------------------------------- |
 | Navegador recente | `DecompressionStream` (GZIP), `TextDecoder`, `clipboard` |
-| Rede (opcional) | CDN do Tailwind para estilos |
+| Rede (opcional)   | CDN do Tailwind para estilos                             |
+
 
 Não há `package.json` nem build obrigatório nesta versão.
 
@@ -104,9 +124,9 @@ Na prática, o analista usa isso para **priorizar triage**, correlacionar com te
 
 1. **Entrada bruta** — o texto inicial é a “camada 0”.
 2. **Por camada**, o motor avalia candidatos:
-   - decodificação **URL** (quando há `%XX`);
-   - decodificação **Hex** (comprimento par, apenas hex);
-   - **Base64** com múltiplas interpretações dos bytes (UTF-8, UTF-16LE, e via **GZIP** se aplicável).
+  - decodificação **URL** (quando há `%XX`);
+  - decodificação **Hex** (comprimento par, apenas hex);
+  - **Base64** com múltiplas interpretações dos bytes (UTF-8, UTF-16LE, e via **GZIP** se aplicável).
 3. Cada candidato recebe uma **pontuação** (palavras-chave de interesse + razão de caracteres imprimíveis).
 4. Escolhe-se o melhor passo; se a pontuação não melhora e não há mais codificação aparente, o loop para.
 5. No texto final, rodam-se **regex e heurísticas** para IoCs e destaques visuais (URLs, IPs, padrões PowerShell configuráveis).
@@ -117,12 +137,14 @@ Tudo roda **no cliente** (JavaScript no navegador). Não enviamos seu payload a 
 
 ## Roadmap / To-do
 
-| Prioridade | Ideia |
-|------------|--------|
-| Alta | Empacotamento opcional (PWA ou extensão de navegador) para uso offline com estilos embutidos |
-| Média | Exportação estruturada (JSON/STIX) para integração com playbooks |
-| Média | Testes automatizados (ex.: casos de decodificação em CI) |
-| Baixa | Internacionalização (i18n) da interface |
+
+| Prioridade | Ideia                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| Alta       | Empacotamento opcional (PWA ou extensão de navegador) para uso offline com estilos embutidos |
+| Média      | Exportação estruturada (JSON/STIX) para integração com playbooks                             |
+| Média      | Testes automatizados (ex.: casos de decodificação em CI)                                     |
+| Baixa      | Internacionalização (i18n) da interface                                                      |
+
 
 Sugestões e *issues* são bem-vindas.
 
