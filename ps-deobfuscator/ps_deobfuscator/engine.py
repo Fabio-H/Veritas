@@ -935,13 +935,20 @@ def recursive_decode(initial: str) -> DecodeResult:
         new_score = score_text(step.text)
         current_encoded = can_apply_more_encoding(current)
         still_encoded = can_apply_more_encoding(step.text)
-        if (
-            new_score <= prev_score
-            and not still_encoded
-            and not current_encoded
-            and not step.force_continue
-        ):
-            break
+        if not step.force_continue:
+            # Plain readable text often matches the Base64/Hex alphabet once
+            # whitespace is stripped (e.g. "Base64 esta decodificando..."),
+            # which makes can_apply_more_encoding() a false positive. Never
+            # trade readable output for an unreadable blob on a non-improving
+            # score, regardless of how "encoded" the text still looks.
+            if (
+                new_score <= prev_score
+                and is_readable_utf8(current)
+                and not is_readable_utf8(step.text)
+            ):
+                break
+            if new_score <= prev_score and not still_encoded and not current_encoded:
+                break
         layers.append(DecodeLayer(step.type, step.text))
         current = step.text
         prev_score = new_score

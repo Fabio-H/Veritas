@@ -3,6 +3,16 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.3.1
+
+### Fixed
+- Recursive decoder no longer re-decodes readable plaintext whose
+  characters happen to match the Base64/Hex alphabet (e.g.
+  `"Base64 esta decodificando corretamente"` was decoded again into
+  garbage and then XOR-mangled). Readable output is now only replaced
+  when the heuristic score actually improves. Regression tests and a
+  `samples/known-good/` payload cover the reported case.
+
 ## 0.3.0
 
 ### Changed

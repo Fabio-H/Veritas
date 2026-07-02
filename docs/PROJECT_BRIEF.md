@@ -41,7 +41,7 @@ O projeto tem duas metas simultâneas:
 | 2 | Histórico commitado e repositório organizado | ✅ |
 | 3 | Biblioteca de payloads de teste (`samples/`) para reproduzir erros de decodificação | ✅ |
 | 4 | Redesign da UI: tema escuro profissional, layout responsivo, cara de produto | 🔨 em andamento |
-| 5 | Corrigir payloads Base64 que decodificam errado (aguardando amostras em `samples/triage/`) | ⏳ |
+| 5 | Corrigir payloads Base64 que decodificam errado (1º caso corrigido em v0.3.1; novos casos → `samples/triage/`) | ✅ |
 | 6 | CI (GitHub Actions) + screenshots/GIF no README + release `.zip` | ⏳ |
 
 ## Texto "About" do GitHub (máx. 100 caracteres)

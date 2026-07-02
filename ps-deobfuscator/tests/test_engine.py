@@ -148,6 +148,26 @@ class EngineDecodeTests(unittest.TestCase):
         self.assertIn(plain, result.final_text)
         self.assertEqual(len(iocs), 0)
 
+    def test_plaintext_that_matches_base64_alphabet_is_not_redecoded(self) -> None:
+        # Regression: reported 2026-07-02. The decoded sentence, with spaces
+        # stripped, is pure [A-Za-z0-9] and therefore "looks like" Base64;
+        # the engine used to decode it again into garbage and then XOR it.
+        plaintext = "Base64 esta decodificando corretamente"
+        payload = base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+
+        result, iocs = decode_payload(payload)
+
+        self.assertEqual(result.final_text, plaintext)
+        self.assertEqual(len(result.layers), 2)  # Raw input + single Base64 layer
+        self.assertEqual(len(iocs), 0)
+
+    def test_readable_plaintext_input_is_left_untouched(self) -> None:
+        plaintext = "relatorio de conexao finalizado sem alertas"
+        result, _ = decode_payload(plaintext)
+
+        self.assertEqual(result.final_text, plaintext)
+        self.assertEqual(len(result.layers), 1)
+
     def test_reports_decode_chain_section(self) -> None:
         result, iocs = decode_payload("SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ==")
         report = format_txt_report(result, iocs)
