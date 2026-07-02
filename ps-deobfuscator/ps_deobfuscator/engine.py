@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import codecs
 import io
 import gzip
+import logging
+import math
 import re
 import zlib
 from dataclasses import dataclass, field
@@ -46,9 +49,14 @@ SCORE_KEYWORDS: Final[tuple[str, ...]] = (
 MAX_DECODE_LAYERS: Final[int] = 8
 MAX_PAYLOAD_CHARS: Final[int] = 1_000_000
 MAX_DECOMPRESSED_BYTES: Final[int] = 2_000_000
+MAX_XOR_INPUT_BYTES: Final[int] = 65_536
+MAX_XOR_TOP_CANDIDATES: Final[int] = 8
 PRINTABLE_RATIO_WEIGHT: Final[int] = 50
 READABLE_PRINTABLE_THRESHOLD: Final[float] = 0.55
 MIN_HEX_LENGTH: Final[int] = 8
+MIN_EMBEDDED_ASSIGN_BASE64_LEN: Final[int] = 28
+MIN_EMBEDDED_ASSIGN_BLOB_ENTROPY: Final[float] = 3.0
+DECODE_CHAIN_PREVIEW_CHARS: Final[int] = 200
 
 SUSPICIOUS_PS_COMMANDS: Final[tuple[str, ...]] = (
     "IEX",
@@ -132,6 +140,8 @@ COMMON_TLDS: Final[frozenset[str]] = frozenset(
     }
 )
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
@@ -169,6 +179,7 @@ class DecodeCandidate:
     type: str
     text: str
     score: float = field(compare=False)
+    force_continue: bool = field(default=False, compare=False)
 
 
 class PayloadTooLargeError(ValueError):
@@ -202,6 +213,21 @@ def printable_ratio(s: str) -> float:
         if o in (9, 10, 13) or 32 <= o <= 126:
             printable += 1
     return printable / len(s)
+
+
+def shannon_entropy_bytes(data: bytes) -> float:
+    """Shannon entropy on byte stream (0.0..8.0)."""
+    if not data:
+        return 0.0
+    counts: dict[int, int] = {}
+    for b in data:
+        counts[b] = counts.get(b, 0) + 1
+    total = len(data)
+    entropy = 0.0
+    for count in counts.values():
+        p = count / total
+        entropy -= p * math.log2(p)
+    return entropy
 
 
 def score_text(s: str) -> float:
@@ -353,6 +379,14 @@ def normalize_base64_string(s: str) -> str:
     return t
 
 
+def normalize_base32_string(s: str) -> str:
+    t = re.sub(r"\s+", "", s).upper()
+    pad = len(t) % 8
+    if pad:
+        t += "=" * (8 - pad)
+    return t
+
+
 def has_url_encoding(s: str) -> bool:
     return bool(re.search(r"%[0-9A-Fa-f]{2}", s))
 
@@ -371,8 +405,40 @@ def looks_like_base64(s: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9+/]+=*", t))
 
 
+def _looks_like_encoded_base64_token(norm_no_ws: str) -> bool:
+    """Heuristic: ASCII letters-only strings often match Base64 alphabet but are not payloads."""
+    if "=" in norm_no_ws:
+        return True
+    return any(ch in "+/0123456789" for ch in norm_no_ws)
+
+
+def looks_like_base32(s: str) -> bool:
+    t = normalize_base32_string(s)
+    if len(t) < 16 or len(t) % 8 != 0:
+        return False
+    return bool(re.fullmatch(r"[A-Z2-7]+=*", t))
+
+
+def has_escaped_unicode(s: str) -> bool:
+    return bool(
+        re.search(r"(\\x[0-9a-fA-F]{2})|(\\u[0-9a-fA-F]{4})|(%u[0-9a-fA-F]{4})", s)
+    )
+
+
 def can_apply_more_encoding(s: str) -> bool:
-    return has_url_encoding(s) or looks_like_hex(s) or looks_like_base64(s)
+    return (
+        has_url_encoding(s)
+        or looks_like_hex(s)
+        or looks_like_base64(s)
+        or looks_like_base32(s)
+        or has_escaped_unicode(s)
+    )
+
+
+def strip_null_bytes(s: str) -> str:
+    if "\x00" not in s:
+        return s
+    return s.replace("\x00", "")
 
 
 def validate_payload_size(raw: str) -> None:
@@ -389,9 +455,9 @@ def try_url_decode(s: str) -> str | None:
         return None
     try:
         dec = unquote_plus(s.replace("+", "%20"))
-        return dec if dec != s else None
-    except Exception:
+    except (ValueError, UnicodeDecodeError):
         return None
+    return dec if dec != s else None
 
 
 def try_hex_decode(s: str) -> str | None:
@@ -404,9 +470,30 @@ def try_hex_decode(s: str) -> str | None:
         return None
     try:
         dec = raw.decode("utf-8", errors="replace")
-    except Exception:
+    except UnicodeDecodeError:
         return None
     return dec if dec else None
+
+
+def try_unicode_escape_decode(s: str) -> tuple[str, str] | None:
+    if not has_escaped_unicode(s):
+        return None
+    if "%u" in s:
+        try:
+            s = re.sub(
+                r"%u([0-9a-fA-F]{4})",
+                lambda m: chr(int(m.group(1), 16)),
+                s,
+            )
+        except ValueError:
+            return None
+    try:
+        decoded = codecs.decode(s, "unicode_escape")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not decoded or decoded == s:
+        return None
+    return ("Unicode escape decode", decoded)
 
 
 def gunzip_bytes(data: bytes) -> bytes | None:
@@ -446,7 +533,7 @@ def zlib_inflate_bytes(data: bytes) -> bytes | None:
             out = _bounded_zlib_decompress(data, wbits)
             if out is not None:
                 return out
-    # raw deflate (no header) — best-effort
+    # raw deflate (no header), best-effort
     return _bounded_zlib_decompress(data, -15)
 
 
@@ -488,7 +575,7 @@ def base64_candidates(s: str) -> list[tuple[str, str]]:
         if zl is not None and zl != raw:
             out.extend(_expand_compressed_variants("Base64 -> ZLIB/DEFLATE", zl))
 
-    # Filter weak UTF-8 when UTF-16LE scores better (JS logic — apenas Base64 direto)
+    # Filter weak UTF-8 when UTF-16LE scores better (JS logic, only direct Base64)
     filtered: list[tuple[str, str]] = []
     utf16_plain = next((x for x in out if x[0] == "Base64 -> UTF-16LE"), None)
     for typ, txt in out:
@@ -499,6 +586,21 @@ def base64_candidates(s: str) -> list[tuple[str, str]]:
     return filtered
 
 
+def base32_candidates(s: str) -> list[tuple[str, str]]:
+    if not looks_like_base32(s):
+        return []
+    t = normalize_base32_string(s)
+    try:
+        raw = base64.b32decode(t, casefold=True)
+    except (binascii.Error, ValueError):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for enc_label, txt in _decode_utf8_utf16le_from_bytes(raw):
+        out.append((f"Base32 -> {enc_label}", txt))
+    return out
+
+
 _RE_FROM_B64 = re.compile(
     r"FromBase64String\s*\(\s*['\"]([A-Za-z0-9+/=\s]+)['\"]", re.IGNORECASE
 )
@@ -506,10 +608,184 @@ _RE_IEX_QUOTED_B64 = re.compile(
     r"\bIEX\b[^'\"]{0,120}?['\"]([A-Za-z0-9+/=\s]{16,})['\"]", re.IGNORECASE | re.DOTALL
 )
 
+_PS_ASSIGN_VAR_FRAGMENT = r"(?:\$[A-Za-z_][\w:]*|\$\{[^}]+\})"
+_RE_PS_ASSIGN_DQ_B64 = re.compile(
+    rf"""
+    (?P<pre>
+      {_PS_ASSIGN_VAR_FRAGMENT}
+      \s*=\s*
+      (?:
+          #
+          \s*
+          [^\r\n]*
+      )?
+      (?:
+          \s
+          |
+          \r?\n
+      )*
+    )
+    "
+    (?P<blob>
+      [^"\r\n]+
+    )
+    "
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+_RE_PS_ASSIGN_SQ_B64 = re.compile(
+    rf"""
+    (?P<pre>
+      {_PS_ASSIGN_VAR_FRAGMENT}
+      \s*=\s*
+      (?:
+          #
+          \s*
+          [^\r\n]*
+      )?
+      (?:
+          \s
+          |
+          \r?\n
+      )*
+    )
+    '
+    (?P<blob>
+      [^\r\n']*
+    )
+    '
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+_RE_ENCODED_COMMAND = re.compile(
+    r"""
+    (?:^|[\s;|&])
+    -
+    (?:encodedcommand|enc)
+    \s+
+    (?:
+        "([^"]+)"
+        |
+        '([^']+)'
+        |
+        ([A-Za-z0-9+/_=-]+)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
-def embedded_powershell_base64_candidates(s: str) -> list[tuple[str, str]]:
-    """Decode embedded FromBase64String / IEX-quoted Base64 blobs as extra candidates."""
+
+def encodedcommand_candidates(s: str) -> list[tuple[str, str]]:
+    """Decode PowerShell -EncodedCommand/-enc argument with automatic padding."""
     found: list[tuple[str, str]] = []
+    seen_chunks: set[str] = set()
+
+    for m in _RE_ENCODED_COMMAND.finditer(s):
+        chunk = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        if not chunk or chunk in seen_chunks:
+            continue
+        seen_chunks.add(chunk)
+
+        normalized = normalize_base64_string(chunk)
+        if not looks_like_base64(normalized):
+            continue
+
+        try:
+            raw = base64.b64decode(normalized)
+        except Exception:
+            continue
+
+        for enc_label, txt in _decode_utf8_utf16le_from_bytes(raw):
+            if txt and txt != s:
+                found.append((f"EncodedCommand -> {enc_label}", txt))
+    return found
+
+
+def rot13_candidate(s: str) -> str | None:
+    """Apply ROT13 only when it improves score or readability."""
+    transformed = s.translate(
+        str.maketrans(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+            "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
+        )
+    )
+    if transformed == s:
+        return None
+
+    old_score = score_text(s)
+    new_score = score_text(transformed)
+    if new_score > old_score:
+        return transformed
+    if not is_readable_utf8(s) and is_readable_utf8(transformed):
+        return transformed
+    return None
+
+
+def _decode_text_from_xor(raw: bytes) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    out.append(("UTF-8", raw.decode("utf-8", errors="replace")))
+    if len(raw) % 2 == 0:
+        out.append(("UTF-16LE", raw.decode("utf-16-le", errors="replace")))
+    return out
+
+
+def xor_byte_candidates(s: str) -> list[tuple[str, str]]:
+    """Bruteforce XOR with all 1-byte keys and keep top scoring outputs."""
+    if not s:
+        return []
+
+    # Quoted `$var = "..." ` patterns are handled by Embedded PS assignment; XOR often false-positives.
+    if _RE_PS_ASSIGN_DQ_B64.search(s) or _RE_PS_ASSIGN_SQ_B64.search(s):
+        return []
+
+    raw_input = s.encode("latin-1", errors="replace")
+    if len(raw_input) > MAX_XOR_INPUT_BYTES:
+        logger.debug("Skipping XOR brute force due to input size: %d bytes", len(raw_input))
+        return []
+
+    # Focus XOR on high-entropy or hard-to-read blobs to avoid unnecessary CPU.
+    entropy = shannon_entropy_bytes(raw_input)
+    if is_readable_utf8(s) and entropy < 4.0:
+        return []
+
+    baseline_score = score_text(s)
+    candidates: list[tuple[str, str, float]] = []
+
+    for key in range(256):
+        xored = bytes(b ^ key for b in raw_input)
+        for enc_label, txt in _decode_text_from_xor(xored):
+            if not txt or txt == s:
+                continue
+
+            text_score = score_text(txt)
+            improved = text_score > baseline_score
+            readability_gain = not is_readable_utf8(s) and is_readable_utf8(txt)
+            if not (improved or readability_gain):
+                continue
+
+            if not is_readable_utf8(txt) and text_score < baseline_score + 4:
+                continue
+
+            candidates.append((f"XOR(0x{key:02X}) -> {enc_label}", txt, text_score))
+
+    # Deduplicate by output text, keep the highest score per unique output.
+    dedup: dict[str, tuple[str, float]] = {}
+    for label, txt, text_score in candidates:
+        prev = dedup.get(txt)
+        if prev is None or text_score > prev[1]:
+            dedup[txt] = (label, text_score)
+
+    ranked = sorted(
+        ((label, txt, text_score) for txt, (label, text_score) in dedup.items()),
+        key=lambda x: x[2],
+        reverse=True,
+    )
+    return [(label, txt) for label, txt, _ in ranked[:MAX_XOR_TOP_CANDIDATES]]
+
+
+def embedded_powershell_base64_candidates(s: str) -> list[tuple[str, str, bool]]:
+    """Decode embedded PowerShell Base64 blobs and optional assignment substitutions."""
+    found: list[tuple[str, str, bool]] = []
     seen: set[str] = set()
 
     def add_chunk(label: str, chunk: str) -> None:
@@ -520,18 +796,71 @@ def embedded_powershell_base64_candidates(s: str) -> list[tuple[str, str]]:
         if not looks_like_base64(chunk):
             return
         for typ, txt in base64_candidates(chunk):
-            found.append((f"{label} -> {typ}", txt))
+            found.append((f"{label} -> {typ}", txt, False))
 
     for m in _RE_FROM_B64.finditer(s):
         add_chunk("Embedded FromBase64String", m.group(1))
     for m in _RE_IEX_QUOTED_B64.finditer(s):
         add_chunk("Embedded IEX-quoted Base64", m.group(1))
+
+    seen_output: set[str] = set()
+    for rex, use_double in (
+        (_RE_PS_ASSIGN_DQ_B64, True),
+        (_RE_PS_ASSIGN_SQ_B64, False),
+    ):
+        for m in rex.finditer(s):
+            blob = m.group("blob") or ""
+            norm = re.sub(r"\s+", "", blob)
+            if len(norm) < MIN_EMBEDDED_ASSIGN_BASE64_LEN:
+                continue
+            entropy = shannon_entropy_bytes(norm.encode("latin-1", errors="replace"))
+            if entropy < MIN_EMBEDDED_ASSIGN_BLOB_ENTROPY:
+                continue
+            if not looks_like_base64(norm):
+                continue
+            if not _looks_like_encoded_base64_token(norm):
+                continue
+
+            variants = base64_candidates(norm)
+            if not variants:
+                continue
+
+            utf8_plain = next((txt for typ, txt in variants if typ == "Base64 -> UTF-8"), None)
+            if utf8_plain is not None and is_readable_utf8(utf8_plain):
+                decoded = utf8_plain
+                inner_label = "Base64 -> UTF-8"
+            else:
+                inner_label, decoded = max(variants, key=lambda x: score_text(x[1]))
+            prefix = m.group("pre") or ""
+
+            replacement = (
+                prefix + '"' + decoded.replace('"', '""') + '"'
+                if use_double
+                else prefix + "'" + decoded.replace("'", "''") + "'"
+            )
+            rebuilt = s[: m.start()] + replacement + s[m.end() :]
+
+            if rebuilt == s:
+                continue
+            if rebuilt in seen_output:
+                continue
+            seen_output.add(rebuilt)
+
+            label = f"Embedded PS assignment {inner_label}"
+            found.append((label, rebuilt, True))
+
     return found
 
 
 def type_rank(typ: str) -> int:
+    if typ.startswith("EncodedCommand"):
+        return 4
     if typ == "URL decode":
         return 3
+    if typ.startswith("Embedded PS assignment"):
+        return 3
+    if typ.startswith("Base32"):
+        return 2
     if typ == "Hex -> text":
         return 2
     if typ.startswith("Embedded"):
@@ -551,6 +880,11 @@ def better_candidate(a: DecodeCandidate, b: DecodeCandidate) -> int:
 def pick_best_step(current: str) -> DecodeCandidate | None:
     candidates: list[DecodeCandidate] = []
 
+    unicode_decoded = try_unicode_escape_decode(current)
+    if unicode_decoded is not None:
+        typ, txt = unicode_decoded
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
+
     u = try_url_decode(current)
     if u is not None:
         candidates.append(DecodeCandidate("URL decode", u, score_text(u)))
@@ -562,7 +896,22 @@ def pick_best_step(current: str) -> DecodeCandidate | None:
     for typ, txt in base64_candidates(current):
         candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
 
-    for typ, txt in embedded_powershell_base64_candidates(current):
+    for typ, txt in base32_candidates(current):
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
+
+    for typ, txt in encodedcommand_candidates(current):
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
+
+    for typ, txt, force_cont in embedded_powershell_base64_candidates(current):
+        candidates.append(
+            DecodeCandidate(typ, txt, score_text(txt), force_continue=force_cont)
+        )
+
+    r13 = rot13_candidate(current)
+    if r13 is not None:
+        candidates.append(DecodeCandidate("ROT13", r13, score_text(r13)))
+
+    for typ, txt in xor_byte_candidates(current):
         candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
 
     if not candidates:
@@ -586,7 +935,12 @@ def recursive_decode(initial: str) -> DecodeResult:
         new_score = score_text(step.text)
         current_encoded = can_apply_more_encoding(current)
         still_encoded = can_apply_more_encoding(step.text)
-        if new_score <= prev_score and not still_encoded and not current_encoded:
+        if (
+            new_score <= prev_score
+            and not still_encoded
+            and not current_encoded
+            and not step.force_continue
+        ):
             break
         layers.append(DecodeLayer(step.type, step.text))
         current = step.text
@@ -671,7 +1025,7 @@ def extract_iocs(text: str) -> tuple[IocRow, ...]:
 
 
 # ---------------------------------------------------------------------------
-# Highlighter (HTML spans — parity with JS for export / optional TUI)
+# Highlighter (HTML spans, parity with JS for export / optional TUI)
 # ---------------------------------------------------------------------------
 
 
@@ -707,7 +1061,8 @@ def highlight_final(text: str) -> str:
 def decode_payload(raw: str) -> tuple[DecodeResult, tuple[IocRow, ...]]:
     """Run recursive decode + IOC extraction on a single string."""
     validate_payload_size(raw)
-    result = recursive_decode(raw)
+    cleaned = strip_null_bytes(raw)
+    result = recursive_decode(cleaned)
     iocs = extract_iocs(result.final_text)
     return result, iocs
 
@@ -723,6 +1078,16 @@ def iocs_as_dicts(iocs: Iterable[IocRow]) -> list[dict[str, str]]:
 def format_txt_report(result: DecodeResult, iocs: Iterable[IocRow]) -> str:
     ioc_rows = tuple(iocs)
     generated_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    decode_chain_lines = ["=== Decode chain ===\n"]
+    for i, layer in enumerate(result.layers, start=1):
+        preview_raw = layer.text.replace("\r\n", "\n")
+        if len(preview_raw) > DECODE_CHAIN_PREVIEW_CHARS:
+            preview_raw = preview_raw[:DECODE_CHAIN_PREVIEW_CHARS].rstrip() + "..."
+        preview_one_line = preview_raw.replace("\n", "\\n")
+        decode_chain_lines.append(f"{i}. {layer.type}\t{preview_one_line}\n")
+    decode_chain_lines.append("\n")
+
     parts: list[str] = [
         f"=== {APP_NAME} report ===\n",
         f"Version: {APP_VERSION}\n",
@@ -730,6 +1095,7 @@ def format_txt_report(result: DecodeResult, iocs: Iterable[IocRow]) -> str:
         "Mode: static defensive analysis; payloads are decoded, never executed.\n",
         f"Layers: {len(result.layers)}\n",
         f"IOCs: {len(ioc_rows)}\n\n",
+        *decode_chain_lines,
         "=== Final text ===\n",
         result.final_text,
         "\n\n=== IOCs ===\n",

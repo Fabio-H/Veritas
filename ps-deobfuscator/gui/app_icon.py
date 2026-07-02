@@ -25,7 +25,7 @@ def resolve_app_icon() -> Path | None:
     """
     Path to ``app_icon.ico`` or ``app_icon.svg`` if present.
 
-    Prefer :func:`load_application_icon` for ``QIcon`` — Windows often won't show SVG via
+    Prefer :func:`load_application_icon` for ``QIcon``; Windows often won't show SVG via
     ``QIcon(str(path))`` unless rasterized.
     """
     d = _package_resources_dir()

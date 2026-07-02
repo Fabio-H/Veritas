@@ -1,0 +1,8 @@
+# Local debug artifacts (do not commit)
+local-debug/
+debug_vital_code.txt
+
+# Knowledge-graph tooling output (regenerable)
+graphify-out/
+.graphify_detect.json
+

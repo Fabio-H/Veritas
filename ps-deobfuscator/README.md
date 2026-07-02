@@ -81,6 +81,19 @@ ps-deobfuscator/
 - GZIP/zlib expansion is bounded to avoid accidental decompression bombs.
 - TXT/JSON exports include app/version/timestamp metadata.
 
-## Web UI (browser-only)
+## Local-only scope
 
-The single-file HTML tools live in the parent folder: `../web/` (see repository root `README.md`).
+This project is desktop/CLI local software only. No web interface is required in this repository.
+
+## Local debug snapshot
+
+Generate an always-updated local TXT with the app's vital code:
+
+```bash
+python scripts/export_debug_vital.py
+```
+
+Output:
+- `local-debug/debug_vital_code.txt`
+
+This file is for local debugging only and is ignored by git.

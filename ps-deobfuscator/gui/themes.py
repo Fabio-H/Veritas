@@ -1,5 +1,5 @@
 """
-Veritas GUI theme — dark, premium RE / malware-analysis aesthetic.
+Veritas GUI theme - dark, premium RE / malware-analysis aesthetic.
 
 Gruvbox-adjacent: near-black base, warm amber/orange accents, muted olive.
 No bright cyan; Fusion + QPalette + global QSS.
@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-# —— Surfaces ——
+# Surfaces
 COLOR_BG0: str = "#0d0d0c"
 COLOR_BG1: str = "#141312"
 COLOR_BG2: str = "#1b1a18"
@@ -18,13 +18,13 @@ COLOR_BG3: str = "#242220"
 COLOR_BORDER0: str = "#2e2c29"
 COLOR_BORDER1: str = "#3a3834"
 
-# —— Text ——
+# Text
 COLOR_FG0: str = "#fbf1c7"
 COLOR_FG1: str = "#e8e4dc"
 COLOR_FG2: str = "#b8b2a8"
 COLOR_FG3: str = "#7a756c"
 
-# —— Accents (warm) ——
+# Accents (warm)
 COLOR_AMBER: str = "#d79921"
 COLOR_AMBER_DIM: str = "#b57614"
 COLOR_ORANGE: str = "#fe8019"
@@ -33,7 +33,7 @@ COLOR_GREEN: str = "#98971a"
 COLOR_GREEN_BRIGHT: str = "#b8bb26"
 COLOR_RED: str = "#cc241d"
 
-# —— Semantic aliases (widgets) ——
+# Semantic aliases (widgets)
 COLOR_BG = COLOR_BG0
 COLOR_BG_ELEVATED = COLOR_BG1
 COLOR_BG_CARD = COLOR_BG2
@@ -51,7 +51,7 @@ COLOR_SUCCESS_BORDER = COLOR_GREEN
 COLOR_DANGER = COLOR_RED
 COLOR_WARNING = COLOR_ORANGE
 
-# —— HTML highlighter (engine span classes) ——
+# HTML highlighter (engine span classes)
 COLOR_HL_URL: str = COLOR_AMBER
 COLOR_HL_IP: str = "#ea6962"
 COLOR_HL_PS: str = COLOR_ORANGE

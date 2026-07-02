@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -47,8 +46,32 @@ from ps_deobfuscator.engine import (
     layers_as_dicts,
 )
 from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
+from ps_deobfuscator.history import HistoryEntry
 
 from gui.themes import highlight_document_css, mono_font, ui_font
+
+
+class IocCurrentOnlyStack(QStackedWidget):
+    """QStackedWidget's default hints use max(all pages); IOC table hints would apply even when hidden.
+
+    Delegate sizeHint/minimumSizeHint to the current widget only so the empty-state layout stays compact.
+    """
+
+    def minimumSizeHint(self) -> QSize:  # type: ignore[override]
+        cur = self.currentWidget()
+        if cur is None:
+            return super().minimumSizeHint()
+        return cur.minimumSizeHint().expandedTo(self.minimumSize())
+
+    def sizeHint(self) -> QSize:  # type: ignore[override]
+        cur = self.currentWidget()
+        if cur is None:
+            return super().sizeHint()
+        sh = cur.sizeHint()
+        return QSize(
+            max(sh.width(), cur.minimumSizeHint().width()),
+            max(sh.height(), cur.minimumSizeHint().height()),
+        ).expandedTo(self.minimumSize())
 
 
 class StatPill(QFrame):
@@ -65,7 +88,7 @@ class StatPill(QFrame):
         t = QLabel(title.upper())
         t.setObjectName("statPillTitle")
         t.setWordWrap(True)
-        self._val = QLabel("—")
+        self._val = QLabel("-")
         self._val.setObjectName("statPillValue")
         lay.addWidget(t)
         lay.addWidget(self._val)
@@ -82,7 +105,7 @@ class PayloadTextEdit(QTextEdit):
         self.setObjectName("payloadInput")
         self.setAcceptDrops(True)
         self.setPlaceholderText(
-            "Paste or drop a payload here — Base64, Hex, URL, GZIP, one-liners… "
+            "Paste or drop a payload here - Base64, Hex, URL, GZIP, one-liners... "
             "Press Ctrl+Enter to decode."
         )
         self.setFont(mono_font(12))
@@ -172,9 +195,10 @@ class _LayerAccordionRow(QWidget):
         header = QToolButton()
         header.setObjectName("accordionHeader")
         header.setCheckable(True)
-        header.setChecked(True)
+        # Collapsed by default so OUTPUT body keeps room for highlight/IOCs; expand to inspect a layer.
+        header.setChecked(False)
         header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        header.setArrowType(Qt.ArrowType.DownArrow)
+        header.setArrowType(Qt.ArrowType.RightArrow)
         header.setText(f"  Layer {index + 1}: {layer_type}")
         header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         header.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -194,6 +218,7 @@ class _LayerAccordionRow(QWidget):
             header.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
 
         header.toggled.connect(on_toggled)
+        body.setVisible(False)
         outer.addWidget(header)
         outer.addWidget(body)
 
@@ -203,6 +228,11 @@ class DecodePanel(QWidget):
 
     _DECODE_SLOW_MS = 15_000
 
+    # Emitted only after a real engine decode finishes successfully.
+    # Restoring from history reuses the same UI path but must not re-emit,
+    # otherwise restored entries would be re-appended to the history store.
+    decode_completed = Signal(str, object, object)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._busy = False
@@ -211,6 +241,7 @@ class DecodePanel(QWidget):
         self._last_result: DecodeResult | None = None
         self._last_iocs: tuple[IocRow, ...] = ()
         self._slow_decode_warned = False
+        self._last_input_text: str = ""
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -227,9 +258,7 @@ class DecodePanel(QWidget):
 
         page = QWidget()
         page.setObjectName("decodePage")
-        # MinimumExpanding: page grows to fill viewport when there is room,
-        # but the scroll area provides at least minimumSizeHint() height —
-        # this is what enables the page to scroll instead of compressing its children.
+        # MinimumExpanding keeps the page filled while preserving scroll fallback.
         page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self._page_scroll.setWidget(page)
 
@@ -241,27 +270,19 @@ class DecodePanel(QWidget):
         title.setObjectName("pageTitle")
         root.addWidget(title)
 
-        sub = QLabel("Pipeline · URL · Hex · Base64 · GZIP · zlib · IOC extraction")
+        sub = QLabel("Pipeline | URL | Hex | Base64 | GZIP | zlib | IOC extraction")
         sub.setObjectName("pageSubtitle")
         sub.setWordWrap(True)
         root.addWidget(sub)
 
-        self._status = QLabel(
-            f"Ready · Max input {MAX_PAYLOAD_CHARS:,} chars · Static analysis only"
-        )
+        self._status = QLabel(f"Ready | Max input {MAX_PAYLOAD_CHARS:,} chars | Static analysis only")
         self._status.setObjectName("muted")
         self._status.setWordWrap(True)
         root.addWidget(self._status)
 
-        self._splitter = QSplitter(Qt.Orientation.Vertical)
-        self._splitter.setChildrenCollapsible(False)
-        self._splitter.setHandleWidth(8)
-        self._splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # —— Input card ——
-        # Do NOT set an explicit minimumHeight here — let the layout compute it from
-        # its children so Qt and the splitter agree on the enforced minimum.
+        # Input card
         card_in = QFrame()
+        self._card_in = card_in
         card_in.setObjectName("card")
         card_in.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         cin = QVBoxLayout(card_in)
@@ -272,13 +293,11 @@ class DecodePanel(QWidget):
         cin.addWidget(lbl_in)
 
         self._input = PayloadTextEdit()
-        # 80 px == ~3 visible lines at 11pt mono — readable without wasting space.
-        self._input.setMinimumHeight(80)
+        self._input.setMinimumHeight(160)
         self._input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cin.addWidget(self._input, stretch=1)
 
-        # Action row: [Paste]  ···stretch···  [progress bar]  [Decode]
-        # QHBoxLayout is simpler and more resize-stable than QGridLayout here.
+        # Action row: [Paste] [Clear] ... [progress] [Decode]
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
@@ -288,6 +307,13 @@ class DecodePanel(QWidget):
         self._paste_btn.setMinimumWidth(72)
         self._paste_btn.clicked.connect(self._paste_clipboard)
         row.addWidget(self._paste_btn)
+
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setObjectName("secondary")
+        self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_btn.setMinimumWidth(72)
+        self._clear_btn.clicked.connect(self._clear_all)
+        row.addWidget(self._clear_btn)
 
         row.addStretch(1)
 
@@ -308,15 +334,12 @@ class DecodePanel(QWidget):
         self._decode_btn.clicked.connect(self._start_decode)
         row.addWidget(self._decode_btn)
         cin.addLayout(row)
-        self._splitter.addWidget(card_in)
+        root.addWidget(card_in)
 
-        # —— Results card ——
-        # Architecture: fixed header (OUTPUT label + stat pills) always visible,
-        # plus a dedicated QScrollArea for the body so that squeezing the splitter
-        # never causes content overlap — the body simply scrolls instead.
+        # Output card
         card_out = QFrame()
+        self._card_out = card_out
         card_out.setObjectName("card")
-        # Minimum matches the fixed header height only; body scrolls below it.
         card_out.setMinimumHeight(110)
         card_out.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -324,7 +347,7 @@ class DecodePanel(QWidget):
         cout_outer.setContentsMargins(0, 0, 0, 0)
         cout_outer.setSpacing(0)
 
-        # ·· Fixed header (always visible) ··
+        # Fixed header
         _hdr = QWidget()
         _hdr.setObjectName("cardOutHeader")
         _hdr.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -354,10 +377,9 @@ class DecodePanel(QWidget):
         _sep.setObjectName("cardSeparator")
         cout_outer.addWidget(_sep)
 
-        # ·· Scrollable body ··
-        # When the splitter squeezes card_out below its natural preferred height,
-        # this scroll area absorbs the difference — nothing ever overlaps.
+        # Scrollable body
         _body_scroll = QScrollArea()
+        self._output_body_scroll = _body_scroll
         _body_scroll.setObjectName("outputBodyScroll")
         _body_scroll.setFrameShape(QFrame.Shape.NoFrame)
         _body_scroll.setWidgetResizable(True)
@@ -366,9 +388,7 @@ class DecodePanel(QWidget):
 
         _body = QWidget()
         _body.setObjectName("cardBody")
-        # MinimumExpanding: the body fills the scroll-area viewport when there is
-        # room (so the stream and table use all available height), and the scroll
-        # area provides at least minimumSizeHint() height when the card is squeezed.
+        # MinimumExpanding keeps content visible while allowing scroll fallback.
         _body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
 
         cout = QVBoxLayout(_body)
@@ -383,8 +403,7 @@ class DecodePanel(QWidget):
         self._layers_layout = QVBoxLayout(self._layers_host)
         self._layers_layout.setContentsMargins(0, 0, 0, 0)
         self._layers_layout.setSpacing(0)
-        # No inner QScrollArea wrapper — the outer _body_scroll handles overflow.
-        # Individual layer bodies keep their own scrollbars (setMaximumHeight below).
+        # Individual layer bodies keep their own scrollbars when needed.
         cout.addWidget(self._layers_host)
 
         hl_label = QLabel("Deobfuscated stream")
@@ -398,27 +417,24 @@ class DecodePanel(QWidget):
         self._highlight.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._highlight.document().setDefaultStyleSheet(highlight_document_css())
         self._highlight.setFont(mono_font(11))
-        cout.addWidget(self._highlight, stretch=3)
+        cout.addWidget(self._highlight, stretch=2)
 
         ioc_label = QLabel("Indicators of compromise")
         ioc_label.setObjectName("cardHint")
         cout.addWidget(ioc_label)
 
         # Stack: index 0 = empty-state label, index 1 = data table.
-        # Switching between them keeps the layout stable regardless of IOC count.
-        self._ioc_stack = QStackedWidget()
+        self._ioc_stack = IocCurrentOnlyStack()
         self._ioc_stack.setObjectName("iocStack")
         self._ioc_stack.setMinimumHeight(160)   # header + ~5 rows
         self._ioc_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # ── Empty state ──
         self._ioc_empty = QLabel("No IOCs detected in the decoded output.")
         self._ioc_empty.setObjectName("iocEmpty")
         self._ioc_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._ioc_empty.setWordWrap(True)
         self._ioc_stack.addWidget(self._ioc_empty)   # index 0
 
-        # ── IOC table ──
         self._ioc_table = QTableWidget(0, 4)
         self._ioc_table.setObjectName("iocTable")
         self._ioc_table.setHorizontalHeaderLabels(["Type", "Value", "Confidence", ""])
@@ -427,7 +443,6 @@ class DecodePanel(QWidget):
         self._ioc_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._ioc_table.setWordWrap(False)
         self._ioc_table.verticalHeader().setVisible(False)
-        # Comfortable row height — fits text + cell padding without feeling cramped.
         self._ioc_table.verticalHeader().setDefaultSectionSize(30)
         self._ioc_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._ioc_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -435,19 +450,15 @@ class DecodePanel(QWidget):
         _hdr = self._ioc_table.horizontalHeader()
         _hdr.setStretchLastSection(False)
         _hdr.setMinimumSectionSize(56)
-        # Type: auto-fit to cell content (short strings like "IPv4", ".NET Library")
         _hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        # Value: stretches to fill remaining width
         _hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        # Confidence: user-resizable with a comfortable starting width
         _hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         _hdr.resizeSection(2, 150)
-        # Copy button column: fixed compact width
         _hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         _hdr.resizeSection(3, 76)
 
         self._ioc_stack.addWidget(self._ioc_table)   # index 1
-        cout.addWidget(self._ioc_stack, stretch=1)
+        cout.addWidget(self._ioc_stack, stretch=3)
 
         export_row = QHBoxLayout()
         self._export_txt = QPushButton("Export TXT")
@@ -467,17 +478,7 @@ class DecodePanel(QWidget):
 
         _body_scroll.setWidget(_body)
         cout_outer.addWidget(_body_scroll, stretch=1)
-
-        self._splitter.addWidget(card_out)
-        self._splitter.setCollapsible(0, False)
-        self._splitter.setCollapsible(1, False)
-        self._splitter.setStretchFactor(0, 1)
-        self._splitter.setStretchFactor(1, 3)
-        # Input card gets ~30 % of initial space; output card gets ~70 %.
-        self._splitter.setSizes([220, 520])
-        self._splitter.splitterMoved.connect(self._on_splitter_moved)
-
-        root.addWidget(self._splitter, stretch=1)
+        root.addWidget(card_out, stretch=1)
 
         sc = QShortcut(QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Return), self)
         sc.activated.connect(self._start_decode)
@@ -485,30 +486,6 @@ class DecodePanel(QWidget):
         sc2.activated.connect(self._start_decode)
 
         self._clear_results_ui()
-
-    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
-        """Keep splitter children at or above their layout minimums.
-
-        Qt's setCollapsible(False) prevents the handle from collapsing a pane
-        entirely, but it does not guarantee the child's minimumSizeHint() is
-        respected during fast drags.  This slot corrects any violation immediately
-        after each move so content never overlaps.
-        """
-        sizes = self._splitter.sizes()
-        if len(sizes) < 2:
-            return
-        s0, s1 = sizes
-        min0 = max(self._splitter.widget(0).minimumSizeHint().height(), 1)
-        min1 = max(self._splitter.widget(1).minimumSizeHint().height(), 1)
-        total = s0 + s1
-        if s0 < min0:
-            s0 = min0
-            s1 = max(total - s0, min1)
-        elif s1 < min1:
-            s1 = min1
-            s0 = max(total - s1, min0)
-        if [s0, s1] != sizes:
-            self._splitter.setSizes([s0, s1])
 
     @staticmethod
     def _copy_value(value: str) -> None:
@@ -519,6 +496,16 @@ class DecodePanel(QWidget):
         if clip is not None and clip.text():
             self._input.setPlainText(clip.text())
             self._input._apply_terminal_spacing()
+
+    def _clear_all(self) -> None:
+        if self._busy:
+            QMessageBox.information(self, "Veritas", "Wait for decoding to finish before clearing.")
+            return
+        self._input.clear()
+        self._last_result = None
+        self._last_iocs = ()
+        self._last_input_text = ""
+        self._clear_results_ui()
 
     def _clear_results_ui(self) -> None:
         while self._layers_layout.count():
@@ -534,10 +521,10 @@ class DecodePanel(QWidget):
         self._ioc_stack.setCurrentIndex(0)   # show empty-state label
         self._export_txt.setEnabled(False)
         self._export_json.setEnabled(False)
-        self._pill_layers.set_value("—")
-        self._pill_iocs.set_value("—")
-        self._pill_chars.set_value("—")
-        self._status.setText(f"Ready · Max input {MAX_PAYLOAD_CHARS:,} chars · Static analysis only")
+        self._pill_layers.set_value("-")
+        self._pill_iocs.set_value("-")
+        self._pill_chars.set_value("-")
+        self._status.setText(f"Ready | Max input {MAX_PAYLOAD_CHARS:,} chars | Static analysis only")
 
     def _start_decode(self) -> None:
         if self._busy:
@@ -560,10 +547,11 @@ class DecodePanel(QWidget):
 
         self._busy = True
         self._slow_decode_warned = False
+        self._last_input_text = payload
         self._decode_btn.setEnabled(False)
-        self._decode_btn.setText("Decoding…")
+        self._decode_btn.setText("Decoding...")
         self._progress.setVisible(True)
-        self._status.setText("Decoding in background…")
+        self._status.setText("Decoding in background...")
 
         self._thread = QThread()
         self._worker = DecodeWorker()
@@ -582,7 +570,7 @@ class DecodePanel(QWidget):
             return
         self._slow_decode_warned = True
         self._status.setText(
-            "Still decoding… large or highly nested input can take longer, but analysis remains bounded."
+            "Still decoding... large or highly nested input can take longer, but analysis remains bounded."
         )
 
     @Slot(object, object)
@@ -592,11 +580,13 @@ class DecodePanel(QWidget):
                 self._thread.quit()
             return
         rows: tuple[IocRow, ...] = iocs if isinstance(iocs, tuple) else ()
+        input_text = self._last_input_text
         self._last_result = result
         self._last_iocs = rows
         self._apply_results(result, self._last_iocs)
         if self._thread is not None:
             self._thread.quit()
+        self.decode_completed.emit(input_text, result, rows)
 
     @Slot(str)
     def _on_decode_failed(self, message: str) -> None:
@@ -626,7 +616,7 @@ class DecodePanel(QWidget):
         self._pill_chars.set_value(f"{len(result.final_text):,}")
 
         if not result.layers:
-            empty = QLabel("No intermediate transforms — blob may already be plaintext.")
+            empty = QLabel("No intermediate transforms - blob may already be plaintext.")
             empty.setObjectName("muted")
             empty.setStyleSheet("font-style: italic; padding: 8px;")
             self._layers_layout.addWidget(empty)
@@ -648,7 +638,7 @@ class DecodePanel(QWidget):
                 val_item.setToolTip(row.valor)   # full value on hover for long strings
                 self._ioc_table.setItem(r, 1, val_item)
 
-                conf = row.confianca if row.confianca else "—"
+                conf = row.confianca if row.confianca else "-"
                 conf_item = QTableWidgetItem(conf)
                 conf_item.setToolTip(conf)
                 self._ioc_table.setItem(r, 2, conf_item)
@@ -671,7 +661,7 @@ class DecodePanel(QWidget):
         self._export_txt.setEnabled(True)
         self._export_json.setEnabled(True)
         self._status.setText(
-            f"Complete · {len(result.layers)} layer(s) · {len(iocs)} IOC(s) · "
+            f"Complete | {len(result.layers)} layer(s) | {len(iocs)} IOC(s) | "
             f"{len(result.final_text):,} output chars"
         )
 
@@ -722,3 +712,27 @@ class DecodePanel(QWidget):
             Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
+
+    def load_from_history(self, entry: HistoryEntry) -> None:
+        """Re-render a previously captured decode without invoking the engine.
+
+        Used by the History panel: snapshot data is reconstructed straight into
+        the UI, no thread, no decode_completed signal, so restoring an entry
+        never feeds the history store back into itself.
+        """
+        if self._busy:
+            return
+
+        self._input.setPlainText(entry.input)
+        self._input._apply_terminal_spacing()
+
+        result = entry.to_decode_result()
+        iocs = entry.to_iocs()
+        self._last_input_text = entry.input
+        self._last_result = result
+        self._last_iocs = iocs
+        self._apply_results(result, iocs)
+        self._status.setText(
+            f"Restored from history | {entry.timestamp} | "
+            f"{len(result.layers)} layer(s) | {len(iocs)} IOC(s)"
+        )

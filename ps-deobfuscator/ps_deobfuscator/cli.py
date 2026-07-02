@@ -85,7 +85,7 @@ def cmd_decode(args: argparse.Namespace) -> int:
     tbl.add_column("Value", overflow="fold")
     tbl.add_column("Confidence")
     for r in iocs:
-        tbl.add_row(r.tipo, r.valor, r.confianca or "—")
+        tbl.add_row(r.tipo, r.valor, r.confianca or "-")
     console.print(tbl)
 
     if args.output:
@@ -134,7 +134,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
 
 def cmd_interactive(_args: argparse.Namespace) -> int:
     console.print(
-        "[bold cyan]ps-deobfuscator interactive[/] — paste payload, empty line + Enter to decode, Ctrl+Z Enter (Win) or Ctrl+D (Unix) to exit."
+        "[bold cyan]ps-deobfuscator interactive[/] - paste payload, empty line + Enter to decode, Ctrl+Z Enter (Win) or Ctrl+D (Unix) to exit."
     )
     lines: list[str] = []
     while True:
@@ -159,7 +159,7 @@ def cmd_interactive(_args: argparse.Namespace) -> int:
             tbl.add_column("Value", overflow="fold")
             tbl.add_column("Confidence")
             for r in iocs:
-                tbl.add_row(r.tipo, r.valor, r.confianca or "—")
+                tbl.add_row(r.tipo, r.valor, r.confianca or "-")
             console.print(tbl)
             console.print("[dim]--- next payload ---[/]")
         elif line == "" and not lines:
