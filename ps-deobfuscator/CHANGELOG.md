@@ -3,6 +3,23 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.3.0
+
+### Changed
+- Complete visual redesign: new "Veritas Dark" theme (deep blue-black
+  surfaces, mint signature accent) replacing the Gruvbox palette. Filled
+  primary Decode button, accent-tinted navigation states, restyled cards,
+  inputs, scrollbars, table headers and accordion layers.
+- Semantic highlight colors in the deobfuscated stream: URLs in cyan,
+  IPs in red, suspicious PowerShell tokens in amber.
+- IOC table: Type column is now color-coded by category (network IOCs
+  red/cyan, hashes mint, PowerShell amber, .NET muted).
+
+### Added
+- `samples/` payload library: `known-good/` regression payloads and a
+  `triage/` drop zone for misdecoded payloads, plus
+  `scripts/run_samples.py` to reproduce full decode chains per sample.
+
 ## 0.2.0
 
 ### Added

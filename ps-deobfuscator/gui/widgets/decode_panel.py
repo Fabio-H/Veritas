@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -48,7 +48,30 @@ from ps_deobfuscator.engine import (
 from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
 from ps_deobfuscator.history import HistoryEntry
 
-from gui.themes import highlight_document_css, mono_font, ui_font
+from gui.themes import (
+    COLOR_AMBER,
+    COLOR_CYAN,
+    COLOR_FG2,
+    COLOR_MINT,
+    COLOR_RED,
+    highlight_document_css,
+    mono_font,
+    ui_font,
+)
+
+# IOC category -> Type column color (visual triage at a glance)
+_IOC_TYPE_COLORS: dict[str, str] = {
+    "IPv4": COLOR_RED,
+    "IPv6": COLOR_RED,
+    "URL": COLOR_CYAN,
+    "Domain": COLOR_CYAN,
+    "Email": COLOR_CYAN,
+    "MD5": COLOR_MINT,
+    "SHA1": COLOR_MINT,
+    "SHA256": COLOR_MINT,
+    "Suspicious PowerShell": COLOR_AMBER,
+    ".NET Library": COLOR_FG2,
+}
 
 
 class IocCurrentOnlyStack(QStackedWidget):
@@ -632,6 +655,12 @@ class DecodePanel(QWidget):
             for r, row in enumerate(iocs):
                 type_item = QTableWidgetItem(row.tipo)
                 type_item.setToolTip(row.tipo)
+                type_color = _IOC_TYPE_COLORS.get(row.tipo)
+                if type_color is not None:
+                    type_item.setForeground(QColor(type_color))
+                    bold = type_item.font()
+                    bold.setWeight(QFont.Weight.DemiBold)
+                    type_item.setFont(bold)
                 self._ioc_table.setItem(r, 0, type_item)
 
                 val_item = QTableWidgetItem(row.valor)
