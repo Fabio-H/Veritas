@@ -44,8 +44,6 @@ Outputs:
 | `../release/ps-deobfuscator-gui/` | Copy at repo root for easy access (whole folder required at runtime). |
 | `../release/Veritas-vX.Y.Z-windows.zip` | Versioned release archive for sharing. |
 
-**Shortcut from repo root:** `Veritas GUI.bat` starts `release/ps-deobfuscator-gui/ps-deobfuscator-gui.exe` if the build exists.
-
 Icons: `python scripts/build_app_icon.py` generates `gui/resources/app_icon.ico` from `app_icon.svg`.
 
 ## Clean build artifacts

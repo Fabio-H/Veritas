@@ -44,6 +44,11 @@ O projeto tem duas metas simultâneas:
 | 5 | Corrigir payloads Base64 que decodificam errado (aguardando amostras em `samples/triage/`) | ⏳ |
 | 6 | CI (GitHub Actions) + screenshots/GIF no README + release `.zip` | ⏳ |
 
+## Texto "About" do GitHub (máx. 100 caracteres)
+
+- PT: `Desobfuscador de payloads para Blue Team: decodificação recursiva e extração de IOCs no desktop.`
+- EN: `Payload deobfuscator for Blue Team: recursive decoding & IOC extraction, desktop app.`
+
 ## Como reproduzir um erro de decodificação
 
 1. Salve o payload problemático em um `.txt` dentro de

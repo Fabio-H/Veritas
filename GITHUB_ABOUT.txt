@@ -1,5 +1,0 @@
-PT (GitHub About — máx. 100 caracteres):
-Decodificador automático de payloads para Blue Team: camadas recursivas e IoCs no navegador.
-
-EN (alternative):
-Automatic payload decoder for Blue Team: recursive layers & IoC extraction in the browser.
