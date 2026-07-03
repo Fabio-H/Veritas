@@ -9,7 +9,17 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QEasingCurve,
+    QObject,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -49,6 +59,8 @@ from ps_deobfuscator.engine import (
 from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
 from ps_deobfuscator.history import HistoryEntry
 
+from gui.widgets.flow_layout import FlowLayout
+from gui.widgets.toast import Toast
 from gui.themes import (
     COLOR_AMBER,
     COLOR_CYAN,
@@ -208,7 +220,10 @@ class DecodeWorker(QObject):
 
 
 class _LayerAccordionRow(QWidget):
-    """Single decode layer: collapsible header + read-only body."""
+    """Single decode layer: collapsible header + read-only body (animated)."""
+
+    _MAX_BODY_HEIGHT = 480
+    _MIN_BODY_HEIGHT = 72
 
     def __init__(self, index: int, layer_type: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -227,24 +242,52 @@ class _LayerAccordionRow(QWidget):
         header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         header.setCursor(Qt.CursorShape.PointingHandCursor)
         header.setFont(ui_font(11, bold=True))
+        self._header = header
 
         body = QPlainTextEdit()
         body.setObjectName("layerBody")
         body.setReadOnly(True)
         body.setPlainText(text)
         body.setFont(mono_font(10))
-        body.setMinimumHeight(72)
-        body.setMaximumHeight(480)
+        body.setMinimumHeight(0)
+        body.setMaximumHeight(self._MAX_BODY_HEIGHT)
         body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._body = body
 
-        def on_toggled(checked: bool) -> None:
-            body.setVisible(checked)
-            header.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+        self._anim = QPropertyAnimation(body, b"maximumHeight", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.finished.connect(self._on_anim_finished)
 
-        header.toggled.connect(on_toggled)
+        header.toggled.connect(self._on_toggled)
         body.setVisible(False)
         outer.addWidget(header)
         outer.addWidget(body)
+
+    def _expanded_height(self) -> int:
+        lines = max(1, self._body.document().blockCount())
+        content = lines * self._body.fontMetrics().lineSpacing() + 28
+        return max(self._MIN_BODY_HEIGHT, min(self._MAX_BODY_HEIGHT, content))
+
+    def _on_toggled(self, checked: bool) -> None:
+        self._header.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+        )
+        self._anim.stop()
+        if checked:
+            self._body.setMaximumHeight(0)
+            self._body.setVisible(True)
+            self._anim.setStartValue(0)
+            self._anim.setEndValue(self._expanded_height())
+        else:
+            self._anim.setStartValue(self._body.height())
+            self._anim.setEndValue(0)
+        self._anim.start()
+
+    def _on_anim_finished(self) -> None:
+        if not self._header.isChecked():
+            self._body.setVisible(False)
+            self._body.setMaximumHeight(self._MAX_BODY_HEIGHT)
 
 
 class DecodePanel(QWidget):
@@ -391,15 +434,15 @@ class DecodePanel(QWidget):
         lbl_out.setObjectName("cardSectionLabel")
         _hdr_lay.addWidget(lbl_out)
 
-        stats = QHBoxLayout()
-        stats.setSpacing(8)
+        # FlowLayout: pills wrap to a second row on narrow windows instead of
+        # squeezing each other.
+        stats = FlowLayout(h_spacing=8, v_spacing=8)
         self._pill_layers = StatPill("Layers")
         self._pill_iocs = StatPill("IOCs")
         self._pill_chars = StatPill("Output chars")
         stats.addWidget(self._pill_layers)
         stats.addWidget(self._pill_iocs)
         stats.addWidget(self._pill_chars)
-        stats.addStretch(1)
         _hdr_lay.addLayout(stats)
         cout_outer.addWidget(_hdr)
 
@@ -451,9 +494,21 @@ class DecodePanel(QWidget):
         self._highlight.setFont(mono_font(11))
         cout.addWidget(self._highlight, stretch=2)
 
+        ioc_row = QHBoxLayout()
+        ioc_row.setSpacing(8)
         ioc_label = QLabel("Indicators of compromise")
         ioc_label.setObjectName("cardHint")
-        cout.addWidget(ioc_label)
+        ioc_row.addWidget(ioc_label)
+        ioc_row.addStretch(1)
+        # Analyst workflow: from alert to action in one click, not row by row.
+        self._copy_all_btn = QPushButton("Copy all")
+        self._copy_all_btn.setObjectName("ghost")
+        self._copy_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_all_btn.setToolTip("Copy every IOC as tab-separated lines")
+        self._copy_all_btn.setEnabled(False)
+        self._copy_all_btn.clicked.connect(self._copy_all_iocs)
+        ioc_row.addWidget(self._copy_all_btn)
+        cout.addLayout(ioc_row)
 
         # Stack: index 0 = empty-state label, index 1 = data table.
         self._ioc_stack = IocCurrentOnlyStack()
@@ -484,8 +539,7 @@ class DecodePanel(QWidget):
         _hdr.setMinimumSectionSize(56)
         _hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         _hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        _hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        _hdr.resizeSection(2, 150)
+        _hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         _hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         _hdr.resizeSection(3, 76)
 
@@ -517,11 +571,23 @@ class DecodePanel(QWidget):
         sc2 = QShortcut(QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Enter), self)
         sc2.activated.connect(self._start_decode)
 
+        self._toast = Toast(self)
+
         self._clear_results_ui()
 
-    @staticmethod
-    def _copy_value(value: str) -> None:
+    def _copy_value(self, value: str) -> None:
         QApplication.clipboard().setText(value)
+        self._toast.show_message("Copied to clipboard")
+
+    def _copy_all_iocs(self) -> None:
+        if not self._last_iocs:
+            return
+        lines = [
+            f"{row.tipo}\t{row.valor}" + (f"\t{row.confianca}" if row.confianca else "")
+            for row in self._last_iocs
+        ]
+        QApplication.clipboard().setText("\n".join(lines))
+        self._toast.show_message(f"{len(lines)} IOC(s) copied")
 
     def _paste_clipboard(self) -> None:
         clip = QApplication.clipboard()
@@ -553,6 +619,7 @@ class DecodePanel(QWidget):
         self._ioc_stack.setCurrentIndex(0)   # show empty-state label
         self._warn_banner.setVisible(False)
         self._warn_banner.setText("")
+        self._copy_all_btn.setEnabled(False)
         self._export_txt.setEnabled(False)
         self._export_json.setEnabled(False)
         self._pill_layers.set_value("-")
@@ -688,7 +755,7 @@ class DecodePanel(QWidget):
                 copy_btn.setObjectName("ghost")
                 copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 copy_btn.setToolTip("Copy value to clipboard")
-                copy_btn.clicked.connect(partial(DecodePanel._copy_value, row.valor))
+                copy_btn.clicked.connect(partial(self._copy_value, row.valor))
                 self._ioc_table.setCellWidget(r, 3, copy_btn)
 
             # Resize Type column to actual content after all rows are inserted.
@@ -699,6 +766,7 @@ class DecodePanel(QWidget):
         else:
             self._ioc_stack.setCurrentIndex(0)   # show empty-state label
 
+        self._copy_all_btn.setEnabled(bool(iocs))
         self._export_txt.setEnabled(True)
         self._export_json.setEnabled(True)
         if len(result.layers) <= 1:
@@ -734,6 +802,8 @@ class DecodePanel(QWidget):
             Path(path).write_text(text, encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self._toast.show_message("TXT report exported")
 
     def _export_json_file(self) -> None:
         if self._last_result is None:
@@ -765,6 +835,8 @@ class DecodePanel(QWidget):
             Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self._toast.show_message("JSON report exported")
 
     def load_from_history(self, entry: HistoryEntry) -> None:
         """Re-render a previously captured decode without invoking the engine.

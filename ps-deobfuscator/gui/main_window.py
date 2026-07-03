@@ -4,10 +4,19 @@ Main application shell: collapsible sidebar + stacked content (decode panel).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QParallelAnimationGroup,
+    QPropertyAnimation,
+    QSettings,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -78,6 +87,22 @@ class MainWindow(QMainWindow):
 
         self._decode_panel.decode_completed.connect(self._on_decode_completed)
         self._history_panel.entry_selected.connect(self._on_history_entry_selected)
+
+        self._sidebar_anim: QParallelAnimationGroup | None = None
+        self._page_anim: QPropertyAnimation | None = None
+
+        # Restore window size/position and sidebar state from the last session.
+        self._settings = QSettings("Veritas", "Veritas")
+        geometry = self._settings.value("window/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        if self._settings.value("sidebar/collapsed", False, type=bool):
+            self._set_sidebar_collapsed(True, remember_user=True, animate=False)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("sidebar/collapsed", self._sidebar_collapsed)
+        super().closeEvent(event)
 
     def _build_sidebar(self) -> QFrame:
         bar = QFrame()
@@ -180,13 +205,29 @@ class MainWindow(QMainWindow):
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
 
+    def _fade_to(self, widget: QWidget) -> None:
+        """Switch the stacked page with a short crossfade."""
+        if self._stack.currentWidget() is widget:
+            return
+        self._stack.setCurrentWidget(widget)
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(160)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda w=widget: w.setGraphicsEffect(None))
+        self._page_anim = anim
+        anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+
     def _show_decode(self) -> None:
-        self._stack.setCurrentWidget(self._decode_panel)
+        self._fade_to(self._decode_panel)
         self._set_nav_active(self._nav_decode)
 
     def _show_history(self) -> None:
         self._history_panel.refresh()
-        self._stack.setCurrentWidget(self._history_panel)
+        self._fade_to(self._history_panel)
         self._set_nav_active(self._nav_history)
 
     def _on_decode_completed(
@@ -243,7 +284,9 @@ class MainWindow(QMainWindow):
     def _toggle_sidebar(self) -> None:
         self._set_sidebar_collapsed(not self._sidebar_collapsed, remember_user=True)
 
-    def _set_sidebar_collapsed(self, collapsed: bool, *, remember_user: bool) -> None:
+    def _set_sidebar_collapsed(
+        self, collapsed: bool, *, remember_user: bool, animate: bool = True
+    ) -> None:
         if remember_user:
             self._sidebar_user_collapsed = collapsed
         self._sidebar_collapsed = collapsed
@@ -266,4 +309,24 @@ class MainWindow(QMainWindow):
             for w in (self._brand_sub, self._disc, self._nav_lbl, self._foot, self._ver):
                 w.setVisible(True)
 
-        self._sidebar.setFixedWidth(end)
+        if not animate:
+            self._sidebar.setFixedWidth(end)
+            return
+        self._animate_sidebar_width(end)
+
+    def _animate_sidebar_width(self, end: int) -> None:
+        if self._sidebar_anim is not None:
+            self._sidebar_anim.stop()
+        group = QParallelAnimationGroup(self)
+        # Animate min and max together: the layout follows both bounds, so the
+        # rail slides instead of snapping.
+        for prop in (b"minimumWidth", b"maximumWidth"):
+            anim = QPropertyAnimation(self._sidebar, prop)
+            anim.setDuration(200)
+            anim.setStartValue(self._sidebar.width())
+            anim.setEndValue(end)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            group.addAnimation(anim)
+        group.finished.connect(lambda: self._sidebar.setFixedWidth(end))
+        self._sidebar_anim = group
+        group.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)

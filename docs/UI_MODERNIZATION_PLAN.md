@@ -44,8 +44,27 @@
 12. **Distribuição**: build PyInstaller windowed atualizado + futuramente um
     instalador (Inno Setup) com atalho no Menu Iniciar.
 
-## Ordem de execução sugerida
+## Status (v0.5.0 — 2026-07-02)
 
-`1 → 4 → 5 → 7 → 10` primeiro (maior impacto percebido por esforço), depois o
-restante. Itens já entregues fora deste plano: abrir sem janela de console
+| Item | Status |
+|------|--------|
+| 1. Sidebar animada | ✅ v0.5.0 |
+| 2. Accordion suave | ✅ v0.5.0 |
+| 3. Transição entre páginas | ✅ v0.5.0 (crossfade) |
+| 4. Toast "Copied!" | ✅ v0.5.0 (+ exportações) |
+| 5. Botão Decode com progresso embutido | mantido como está (texto "Decoding..." + barra) |
+| 6. Sombras nos cards | ❌ descartado de propósito: Qt permite 1 efeito gráfico por widget (conflita com o crossfade) e rasteriza o card inteiro a cada repaint, prejudicando o scroll |
+| 7. Quebra automática (pills) | ✅ v0.5.0 (FlowLayout) |
+| 8. Escala por DPI | parcial (PassThrough já ativo); revisar em monitor high-DPI real |
+| 9. Tabela IOC responsiva | ✅ v0.5.0 (Confidence auto-size) |
+| 10. Memória de janela | ✅ v0.5.0 (QSettings) |
+| 11. Instância única | ✅ v0.5.0 (QLocalServer) |
+| 12. Build windowed + instalador | ⏳ próximo (PyInstaller já configurado; falta Inno Setup) |
+
+Extras da pesquisa de UX (fora do plano original), também em v0.5.0:
+barra de título nativa escura no Windows (checklist da Microsoft: janela
+nativa deve combinar com o tema) e botão **Copy all IOCs** (diretriz de
+SOC: do alerta à ação em segundos, sem copiar linha a linha).
+
+Itens entregues antes deste plano: abrir sem janela de console
 (v0.4.0, `[project.gui-scripts]` + atalho `Veritas.lnk`).

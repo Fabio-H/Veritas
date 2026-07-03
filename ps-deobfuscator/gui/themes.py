@@ -517,6 +517,15 @@ def build_app_stylesheet() -> str:
     QMessageBox {{
         background-color: {COLOR_BG2};
     }}
+    QLabel#toast {{
+        background-color: {COLOR_BG3};
+        color: {COLOR_FG0};
+        border: 1px solid {COLOR_MINT_DIM};
+        border-radius: 8px;
+        padding: 8px 18px;
+        font-size: 10pt;
+        font-weight: 600;
+    }}
     """
 
 

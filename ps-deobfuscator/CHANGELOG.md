@@ -3,6 +3,34 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.5.0 — UI modernization
+
+### Added
+- **Motion**: sidebar collapses/expands with a 200 ms eased slide;
+  decode-chain layers open with an animated reveal; switching
+  Quick Decode ↔ History crossfades instead of snapping.
+- **Feedback**: toast confirmations ("Copied to clipboard",
+  "N IOC(s) copied", "TXT/JSON report exported") — actions no longer
+  happen silently.
+- **Copy all IOCs** button: every indicator copied as tab-separated
+  lines in one click (SOC guideline: from alert to action in seconds).
+- **Window memory**: size, position and sidebar state persist across
+  sessions (QSettings) — per Microsoft's desktop UX checklist.
+- **Single instance**: relaunching the shortcut activates the running
+  window instead of opening a second copy (QLocalServer).
+- **Dark native title bar** on Windows (Qt color scheme hint): the
+  window frame finally matches the dark theme.
+- Stat pills reflow to a second row on narrow windows (FlowLayout).
+
+### Changed
+- IOC table Confidence column sizes to its content instead of a fixed
+  150 px.
+
+### Notes
+- Card drop shadows were evaluated and intentionally skipped: Qt allows
+  one graphics effect per widget (conflicts with the crossfade) and
+  rasterizes the whole card on each repaint, hurting scroll performance.
+
 ## 0.4.0
 
 ### Added
