@@ -435,6 +435,44 @@ def can_apply_more_encoding(s: str) -> bool:
     )
 
 
+_RE_B64_TOKEN_WITH_PAD = re.compile(r"\A([A-Za-z0-9+/_-]+)(=+)\Z")
+_RE_B64_TOKEN = re.compile(r"\A[A-Za-z0-9+/_-]+=*\Z")
+
+
+def input_anomalies(raw: str) -> tuple[str, ...]:
+    """Non-fatal input irregularities worth surfacing in the UI.
+
+    The decoder stays deliberately lenient (malformed padding is a common
+    evasion trick in the wild), so anomalies are reported to the analyst
+    instead of rejecting the payload.
+    """
+    notes: list[str] = []
+    stripped = raw.strip()
+
+    # Only judge padding when the whole input is a single Base64-like token;
+    # interior whitespace means mixed content (commands, flags, prose).
+    if stripped and not re.search(r"\s", stripped) and _RE_B64_TOKEN.match(stripped):
+        m = _RE_B64_TOKEN_WITH_PAD.match(stripped)
+        body = m.group(1) if m else stripped
+        pad_found = len(m.group(2)) if m else 0
+        expected = (-len(body)) % 4
+        if expected == 3:
+            notes.append(
+                "Base64 length is invalid (one stray or missing character); "
+                "the decode result may be unreliable."
+            )
+        elif pad_found != expected:
+            notes.append(
+                f"Invalid Base64 padding: found {pad_found} '=' but {expected} expected. "
+                "Decoded after automatic repair (malformed padding is a common evasion trick)."
+            )
+
+    if "\x00" in raw:
+        notes.append("Input contains NUL bytes; they were stripped before analysis.")
+
+    return tuple(notes)
+
+
 def strip_null_bytes(s: str) -> str:
     if "\x00" not in s:
         return s

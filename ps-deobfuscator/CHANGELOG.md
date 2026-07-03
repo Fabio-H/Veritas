@@ -3,6 +3,26 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.4.0
+
+### Added
+- Input anomaly warnings: an amber banner in Quick Decode now reports
+  malformed input that was decoded anyway — invalid/excess Base64
+  padding (e.g. `SGVsbG8gV29ybGQh===`), invalid Base64 length and NUL
+  bytes. The decoder stays deliberately lenient (malformed padding is a
+  common evasion trick); the analyst is informed instead of blocked.
+- Honest status line when nothing decodes: "No supported encoding
+  detected | input shown as-is" instead of pretending a 1-layer decode
+  completed.
+- `docs/UI_MODERNIZATION_PLAN.md`: phased plan (animations, feedback,
+  responsiveness, real-app behavior) approved for future sessions.
+
+### Changed
+- The GUI entry point moved from `[project.scripts]` to
+  `[project.gui-scripts]`: `ps-deobfuscator-gui.exe` now opens the app
+  directly with no console window. A `Veritas.lnk` shortcut (repo root
+  and Desktop) launches it like a regular application.
+
 ## 0.3.1
 
 ### Fixed

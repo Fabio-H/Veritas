@@ -42,6 +42,7 @@ from ps_deobfuscator.engine import (
     decode_payload,
     format_txt_report,
     highlight_final,
+    input_anomalies,
     iocs_as_dicts,
     layers_as_dicts,
 )
@@ -303,6 +304,14 @@ class DecodePanel(QWidget):
         self._status.setWordWrap(True)
         root.addWidget(self._status)
 
+        # Input anomaly banner (invalid padding, NUL bytes, ...). Hidden until
+        # a decode finds something worth telling the analyst about.
+        self._warn_banner = QLabel("")
+        self._warn_banner.setObjectName("warnBanner")
+        self._warn_banner.setWordWrap(True)
+        self._warn_banner.setVisible(False)
+        root.addWidget(self._warn_banner)
+
         # Input card
         card_in = QFrame()
         self._card_in = card_in
@@ -542,6 +551,8 @@ class DecodePanel(QWidget):
         )
         self._ioc_table.setRowCount(0)
         self._ioc_stack.setCurrentIndex(0)   # show empty-state label
+        self._warn_banner.setVisible(False)
+        self._warn_banner.setText("")
         self._export_txt.setEnabled(False)
         self._export_json.setEnabled(False)
         self._pill_layers.set_value("-")
@@ -607,6 +618,7 @@ class DecodePanel(QWidget):
         self._last_result = result
         self._last_iocs = rows
         self._apply_results(result, self._last_iocs)
+        self._show_input_warnings(input_text)
         if self._thread is not None:
             self._thread.quit()
         self.decode_completed.emit(input_text, result, rows)
@@ -689,10 +701,22 @@ class DecodePanel(QWidget):
 
         self._export_txt.setEnabled(True)
         self._export_json.setEnabled(True)
-        self._status.setText(
-            f"Complete | {len(result.layers)} layer(s) | {len(iocs)} IOC(s) | "
-            f"{len(result.final_text):,} output chars"
-        )
+        if len(result.layers) <= 1:
+            self._status.setText(
+                "No supported encoding detected | input shown as-is | "
+                f"{len(iocs)} IOC(s) extracted from the raw text"
+            )
+        else:
+            self._status.setText(
+                f"Complete | {len(result.layers)} layer(s) | {len(iocs)} IOC(s) | "
+                f"{len(result.final_text):,} output chars"
+            )
+
+    def _show_input_warnings(self, input_text: str) -> None:
+        notes = input_anomalies(input_text)
+        if notes:
+            self._warn_banner.setText("⚠  " + "\n⚠  ".join(notes))
+        self._warn_banner.setVisible(bool(notes))
 
     def _export_txt_file(self) -> None:
         if self._last_result is None:
@@ -761,6 +785,7 @@ class DecodePanel(QWidget):
         self._last_result = result
         self._last_iocs = iocs
         self._apply_results(result, iocs)
+        self._show_input_warnings(entry.input)
         self._status.setText(
             f"Restored from history | {entry.timestamp} | "
             f"{len(result.layers)} layer(s) | {len(iocs)} IOC(s)"

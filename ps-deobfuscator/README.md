@@ -17,7 +17,9 @@ pip install -e ".[gui]"
 python main_gui.py
 ```
 
-Or after install: `ps-deobfuscator-gui`
+Or after install: `ps-deobfuscator-gui` — registered as a **GUI script**, so it
+opens the app directly with no console window. The `Veritas.lnk` shortcut
+(repo root / Desktop) points to it with the app icon.
 
 ## Build Windows executable
 

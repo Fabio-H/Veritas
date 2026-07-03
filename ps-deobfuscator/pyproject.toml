@@ -1,6 +1,6 @@
 [project]
 name = "ps-deobfuscator"
-version = "0.3.1"
+version = "0.4.0"
 description = "Recursive PowerShell-oriented payload deobfuscator (URL, Hex, Base64, GZIP)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,6 +21,10 @@ build = [
 
 [project.scripts]
 ps-deobfuscator = "ps_deobfuscator.cli:main"
+
+# gui-scripts creates a windowed executable: double-click opens the app
+# directly, with no console window behind it.
+[project.gui-scripts]
 ps-deobfuscator-gui = "main_gui:run_app"
 
 [build-system]

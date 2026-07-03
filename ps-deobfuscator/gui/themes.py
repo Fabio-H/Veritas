@@ -211,6 +211,14 @@ def build_app_stylesheet() -> str:
         color: {COLOR_FG3};
         font-size: 9pt;
     }}
+    QLabel#warnBanner {{
+        color: {COLOR_AMBER};
+        background-color: rgba(240, 180, 41, 0.08);
+        border: 1px solid {COLOR_AMBER_DIM};
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 10pt;
+    }}
     QLabel#statPillTitle {{
         color: {COLOR_FG3};
         font-size: 8pt;

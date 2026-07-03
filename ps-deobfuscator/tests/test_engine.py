@@ -12,6 +12,7 @@ from ps_deobfuscator.engine import (
     extract_iocs,
     format_txt_report,
     highlight_final,
+    input_anomalies,
 )
 
 
@@ -167,6 +168,28 @@ class EngineDecodeTests(unittest.TestCase):
 
         self.assertEqual(result.final_text, plaintext)
         self.assertEqual(len(result.layers), 1)
+
+    def test_input_anomalies_flags_excess_base64_padding(self) -> None:
+        # Regression: reported 2026-07-02. "Hello World!" with 3 stray '='
+        # decoded fine but the analyst got no hint the input was malformed.
+        notes = input_anomalies("SGVsbG8gV29ybGQh===")
+
+        self.assertEqual(len(notes), 1)
+        self.assertIn("padding", notes[0].lower())
+
+    def test_input_anomalies_empty_for_valid_base64(self) -> None:
+        self.assertEqual(input_anomalies("SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ=="), ())
+
+    def test_input_anomalies_ignores_mixed_content_with_spaces(self) -> None:
+        # Interior whitespace means the input is not a single Base64 token
+        # (commands, flags, prose) - padding rules must not apply.
+        self.assertEqual(
+            input_anomalies("powershell -EncodedCommand SQBFAFgA=="), ()
+        )
+
+    def test_input_anomalies_flags_nul_bytes(self) -> None:
+        notes = input_anomalies("IEX\x00 payload")
+        self.assertTrue(any("NUL" in n for n in notes))
 
     def test_reports_decode_chain_section(self) -> None:
         result, iocs = decode_payload("SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ==")
