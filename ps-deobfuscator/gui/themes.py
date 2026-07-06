@@ -1,8 +1,13 @@
 """
-Veritas GUI theme - "Veritas Dark": modern security-product aesthetic.
+Veritas GUI theme - "Veritas Blue": electric-cyan-on-cool-slate.
 
-Deep blue-black surfaces, mint-green signature accent, cyan/red/amber
-semantic highlights for URLs/IPs/PowerShell. Fusion + QPalette + global QSS.
+Adapted from the Claude Design "Electric cyan on cool slate" direction
+(VS Code / Linear adjacent). Cool blue-slate surfaces, a single confident
+electric-blue accent, amber/red/green reserved for semantic status.
+
+Typography follows Apple's system look: SF Pro / SF Mono when installed
+(Apple platforms), falling back to Inter (the closest free match) and then
+Segoe UI on Windows. Fusion + QPalette + global QSS.
 """
 
 from __future__ import annotations
@@ -10,50 +15,55 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-# Surfaces (blue-black slate)
-COLOR_BG0: str = "#0a0e13"
-COLOR_BG1: str = "#0f141b"
-COLOR_BG2: str = "#141b24"
-COLOR_BG3: str = "#1b2431"
-COLOR_BORDER0: str = "#222c3a"
-COLOR_BORDER1: str = "#2e3b4e"
+# Surfaces (cool blue-slate)
+COLOR_BG0: str = "#0B0E13"
+COLOR_BG1: str = "#11151C"
+COLOR_BG2: str = "#161C26"
+COLOR_BG3: str = "#1E2735"
+COLOR_BORDER0: str = "#1A2029"
+COLOR_BORDER1: str = "#232B38"
 
 # Text
-COLOR_FG0: str = "#eef3f8"
-COLOR_FG1: str = "#d5dde6"
-COLOR_FG2: str = "#9fadbd"
-COLOR_FG3: str = "#5f6f81"
+COLOR_FG0: str = "#E6EBF2"
+COLOR_FG1: str = "#D5DDE6"
+COLOR_FG2: str = "#8FA0B5"
+COLOR_FG3: str = "#5F6B7E"
 
-# Signature accent (mint) + semantic colors
-COLOR_MINT: str = "#2fd6a0"
-COLOR_MINT_BRIGHT: str = "#4beab5"
-COLOR_MINT_DIM: str = "#1ba57e"
-COLOR_CYAN: str = "#56c2f0"
-COLOR_RED: str = "#f26d6d"
-COLOR_AMBER: str = "#f0b429"
-COLOR_AMBER_DIM: str = "#c98f14"
+# Signature accent (electric blue) + semantic colors
+COLOR_BLUE: str = "#4C9EFF"
+COLOR_BLUE_BRIGHT: str = "#6BB0FF"
+COLOR_BLUE_DIM: str = "#2F7FD9"
+COLOR_ACCENT_CHIP_BG: str = "#132E4D"
+COLOR_CYAN: str = "#56C2F0"
+COLOR_RED: str = "#F26D6D"
+COLOR_AMBER: str = "#E3B341"
+COLOR_AMBER_DIM: str = "#B8892B"
+COLOR_GREEN_STATUS: str = "#3FB950"
 
 # Legacy aliases (kept so older imports keep working)
+COLOR_MINT: str = COLOR_BLUE
+COLOR_MINT_BRIGHT: str = COLOR_BLUE_BRIGHT
+COLOR_MINT_DIM: str = COLOR_BLUE_DIM
 COLOR_ORANGE: str = COLOR_AMBER
 COLOR_ORANGE_DIM: str = COLOR_AMBER_DIM
-COLOR_GREEN: str = COLOR_MINT_DIM
-COLOR_GREEN_BRIGHT: str = COLOR_MINT
+COLOR_GREEN: str = COLOR_GREEN_STATUS
+COLOR_GREEN_BRIGHT: str = COLOR_GREEN_STATUS
 
 # Semantic aliases (widgets)
 COLOR_BG = COLOR_BG0
 COLOR_BG_ELEVATED = COLOR_BG1
-COLOR_BG_CARD = COLOR_BG2
-COLOR_BG_INPUT = COLOR_BG0
+COLOR_BG_CARD = COLOR_BG1
+COLOR_BG_INPUT = COLOR_BG2
 COLOR_BORDER = COLOR_BORDER0
-COLOR_BORDER_FOCUS = COLOR_MINT
-COLOR_ACCENT = COLOR_MINT
-COLOR_ACCENT_HOVER = COLOR_MINT_BRIGHT
-COLOR_ACCENT_TEXT = "#06231a"
+COLOR_BORDER_FOCUS = COLOR_BLUE
+COLOR_ACCENT = COLOR_BLUE
+COLOR_ACCENT_HOVER = COLOR_BLUE_BRIGHT
+COLOR_ACCENT_TEXT = "#041428"
 COLOR_TEXT = COLOR_FG1
 COLOR_TEXT_MUTED = COLOR_FG3
-COLOR_SUCCESS = COLOR_MINT
+COLOR_SUCCESS = COLOR_GREEN_STATUS
 COLOR_SUCCESS_BG = COLOR_BG2
-COLOR_SUCCESS_BORDER = COLOR_MINT_DIM
+COLOR_SUCCESS_BORDER = COLOR_GREEN_STATUS
 COLOR_DANGER = COLOR_RED
 COLOR_WARNING = COLOR_AMBER
 
@@ -63,17 +73,43 @@ COLOR_HL_IP: str = COLOR_RED
 COLOR_HL_PS: str = COLOR_AMBER
 
 # Accent-tinted translucent fills (QSS rgba)
-_ACCENT_FILL_SOFT: str = "rgba(47, 214, 160, 0.10)"
-_ACCENT_FILL_MED: str = "rgba(47, 214, 160, 0.16)"
-_SELECTION_BG: str = "#1f4a3c"
+_ACCENT_FILL_SOFT: str = "rgba(76, 158, 255, 0.09)"
+_ACCENT_FILL_MED: str = "rgba(76, 158, 255, 0.15)"
+_SELECTION_BG: str = "#16324F"
 
-FONT_UI_STACK: str = '"IBM Plex Sans", "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial'
-FONT_MONO_STACK: str = '"JetBrains Mono", "Cascadia Code", "IBM Plex Mono", Consolas, monospace'
+# Apple-style type: SF Pro / SF Mono first (Apple platforms), then Inter
+# (closest free match), then platform defaults.
+FONT_UI_STACK: str = (
+    '"SF Pro Display", "SF Pro Text", "Inter", "Segoe UI Variable", '
+    '"Segoe UI", "Helvetica Neue", Arial'
+)
+FONT_MONO_STACK: str = (
+    '"SF Mono", "JetBrains Mono", "Cascadia Code", "IBM Plex Mono", '
+    "Consolas, monospace"
+)
+
+_UI_FAMILIES = [
+    "SF Pro Display",
+    "SF Pro Text",
+    "Inter",
+    "Segoe UI Variable",
+    "Segoe UI",
+    "Helvetica Neue",
+    "Arial",
+]
+_MONO_FAMILIES = [
+    "SF Mono",
+    "JetBrains Mono",
+    "Cascadia Code",
+    "IBM Plex Mono",
+    "Consolas",
+    "monospace",
+]
 
 
 def mono_font(point_size: int = 12) -> QFont:
     f = QFont()
-    f.setFamilies(["JetBrains Mono", "Cascadia Code", "IBM Plex Mono", "Consolas", "monospace"])
+    f.setFamilies(_MONO_FAMILIES)
     f.setPointSize(point_size)
     f.setStyleHint(QFont.StyleHint.Monospace)
     return f
@@ -81,7 +117,7 @@ def mono_font(point_size: int = 12) -> QFont:
 
 def ui_font(point_size: int = 12, bold: bool = False) -> QFont:
     f = QFont()
-    f.setFamilies(["IBM Plex Sans", "Source Sans 3", "Segoe UI", "Helvetica Neue", "Arial"])
+    f.setFamilies(_UI_FAMILIES)
     f.setPointSize(point_size)
     if bold:
         f.setWeight(QFont.Weight.DemiBold)
@@ -140,13 +176,13 @@ def build_app_stylesheet() -> str:
     }}
     QMenuBar::item:selected {{
         background-color: {COLOR_BG3};
-        color: {COLOR_MINT};
+        color: {COLOR_BLUE};
     }}
     QMenu {{
         background-color: {COLOR_BG2};
         color: {COLOR_FG1};
-        border: 1px solid {COLOR_BORDER0};
-        border-radius: 6px;
+        border: 1px solid {COLOR_BORDER1};
+        border-radius: 8px;
     }}
     QMenu::item {{
         padding: 6px 24px;
@@ -154,13 +190,13 @@ def build_app_stylesheet() -> str:
     }}
     QMenu::item:selected {{
         background-color: {_ACCENT_FILL_MED};
-        color: {COLOR_MINT_BRIGHT};
+        color: {COLOR_BLUE_BRIGHT};
     }}
     QLabel {{
         background-color: transparent;
     }}
     QFrame#card {{
-        background-color: {COLOR_BG2};
+        background-color: {COLOR_BG1};
         border: 1px solid {COLOR_BORDER0};
         border-radius: 10px;
     }}
@@ -170,11 +206,11 @@ def build_app_stylesheet() -> str:
     }}
     QFrame#disclaimer {{
         background-color: {_ACCENT_FILL_SOFT};
-        border: 1px solid {COLOR_MINT_DIM};
+        border: 1px solid {COLOR_BLUE_DIM};
         border-radius: 8px;
     }}
     QFrame#statPill {{
-        background-color: {COLOR_BG3};
+        background-color: {COLOR_BG2};
         border: 1px solid {COLOR_BORDER0};
         border-radius: 8px;
         min-width: 72px;
@@ -191,7 +227,7 @@ def build_app_stylesheet() -> str:
         font-size: 11pt;
     }}
     QLabel#brandTitle {{
-        color: {COLOR_MINT};
+        color: {COLOR_BLUE};
         font-size: 20pt;
         font-weight: 700;
         letter-spacing: -0.02em;
@@ -213,7 +249,7 @@ def build_app_stylesheet() -> str:
     }}
     QLabel#warnBanner {{
         color: {COLOR_AMBER};
-        background-color: rgba(240, 180, 41, 0.08);
+        background-color: rgba(227, 179, 65, 0.08);
         border: 1px solid {COLOR_AMBER_DIM};
         border-radius: 8px;
         padding: 8px 12px;
@@ -226,15 +262,15 @@ def build_app_stylesheet() -> str:
         letter-spacing: 0.08em;
     }}
     QLabel#statPillValue {{
-        color: {COLOR_MINT};
+        color: {COLOR_BLUE};
         font-size: 14pt;
         font-weight: 700;
     }}
     QLabel#cardSectionLabel {{
-        color: {COLOR_MINT};
+        color: {COLOR_FG2};
         font-size: 10pt;
         font-weight: 700;
-        letter-spacing: 0.10em;
+        letter-spacing: 0.12em;
     }}
     QLabel#cardHint {{
         color: {COLOR_FG2};
@@ -245,32 +281,32 @@ def build_app_stylesheet() -> str:
     QPushButton#sidebarToggle {{
         background-color: transparent;
         color: {COLOR_FG2};
-        border: 1px solid {COLOR_BORDER0};
+        border: 1px solid {COLOR_BORDER1};
         border-radius: 6px;
         padding: 4px 8px;
         font-weight: 700;
     }}
     QPushButton#sidebarToggle:hover {{
-        border-color: {COLOR_MINT_DIM};
-        color: {COLOR_MINT};
+        border-color: {COLOR_BLUE_DIM};
+        color: {COLOR_BLUE};
         background-color: {_ACCENT_FILL_SOFT};
     }}
     QPushButton#sidebarToggle:pressed {{
         background-color: {COLOR_BG2};
-        border-color: {COLOR_MINT};
+        border-color: {COLOR_BLUE};
     }}
     QPushButton#navActive {{
         text-align: left;
         padding: 10px 12px;
         border-radius: 8px;
         background-color: {_ACCENT_FILL_MED};
-        color: {COLOR_MINT_BRIGHT};
+        color: {COLOR_BLUE_BRIGHT};
         font-weight: 600;
-        border: 1px solid {COLOR_MINT_DIM};
+        border: 1px solid {COLOR_BLUE_DIM};
     }}
     QPushButton#navActive:hover {{
         background-color: {_ACCENT_FILL_MED};
-        border-color: {COLOR_MINT};
+        border-color: {COLOR_BLUE};
     }}
     QPushButton#navInactive {{
         text-align: left;
@@ -286,21 +322,21 @@ def build_app_stylesheet() -> str:
         border-color: {COLOR_BORDER0};
     }}
     QPushButton#primary {{
-        background-color: {COLOR_MINT};
+        background-color: {COLOR_BLUE};
         color: {COLOR_ACCENT_TEXT};
         font-weight: 700;
         padding: 8px 18px;
         border-radius: 8px;
-        border: 1px solid {COLOR_MINT};
+        border: 1px solid {COLOR_BLUE};
         min-width: 92px;
     }}
     QPushButton#primary:hover {{
-        background-color: {COLOR_MINT_BRIGHT};
-        border-color: {COLOR_MINT_BRIGHT};
+        background-color: {COLOR_BLUE_BRIGHT};
+        border-color: {COLOR_BLUE_BRIGHT};
     }}
     QPushButton#primary:pressed {{
-        background-color: {COLOR_MINT_DIM};
-        border-color: {COLOR_MINT_DIM};
+        background-color: {COLOR_BLUE_DIM};
+        border-color: {COLOR_BLUE_DIM};
     }}
     QPushButton#primary:disabled {{
         background-color: {COLOR_BG3};
@@ -316,8 +352,8 @@ def build_app_stylesheet() -> str:
         font-weight: 600;
     }}
     QPushButton#secondary:hover {{
-        border-color: {COLOR_MINT_DIM};
-        color: {COLOR_MINT};
+        border-color: {COLOR_BLUE_DIM};
+        color: {COLOR_BLUE};
         background-color: {_ACCENT_FILL_SOFT};
     }}
     QPushButton#secondary:pressed {{
@@ -330,7 +366,7 @@ def build_app_stylesheet() -> str:
     }}
     QPushButton#ghost {{
         background-color: transparent;
-        color: {COLOR_MINT};
+        color: {COLOR_BLUE};
         border: 1px solid transparent;
         border-radius: 6px;
         padding: 4px 10px;
@@ -339,16 +375,16 @@ def build_app_stylesheet() -> str:
         min-width: 52px;
     }}
     QPushButton#ghost:hover {{
-        border-color: {COLOR_MINT_DIM};
+        border-color: {COLOR_BLUE_DIM};
         background-color: {_ACCENT_FILL_SOFT};
-        color: {COLOR_MINT_BRIGHT};
+        color: {COLOR_BLUE_BRIGHT};
     }}
     QPushButton#ghost:pressed {{
         background-color: {COLOR_BG2};
         color: {COLOR_FG0};
     }}
     QTextEdit#payloadInput, QPlainTextEdit#payloadInput {{
-        background-color: {COLOR_BG0};
+        background-color: {COLOR_BG2};
         color: {COLOR_FG1};
         font-family: {FONT_MONO_STACK};
         border: 1px solid {COLOR_BORDER1};
@@ -358,7 +394,7 @@ def build_app_stylesheet() -> str:
         selection-color: {COLOR_FG0};
     }}
     QTextEdit#payloadInput:focus, QPlainTextEdit#payloadInput:focus {{
-        border-color: {COLOR_MINT};
+        border-color: {COLOR_BLUE};
     }}
     QPlainTextEdit#layerBody {{
         background-color: {COLOR_BG0};
@@ -430,11 +466,11 @@ def build_app_stylesheet() -> str:
         border: none;
     }}
     QHeaderView::section {{
-        background-color: {COLOR_BG2};
+        background-color: {COLOR_BG1};
         color: {COLOR_FG2};
         padding: 8px 10px;
         border: none;
-        border-bottom: 2px solid {COLOR_MINT_DIM};
+        border-bottom: 2px solid {COLOR_BLUE_DIM};
         font-weight: 700;
         font-size: 9pt;
         letter-spacing: 0.06em;
@@ -450,7 +486,7 @@ def build_app_stylesheet() -> str:
         max-height: 4px;
     }}
     QProgressBar::chunk {{
-        background-color: {COLOR_MINT};
+        background-color: {COLOR_BLUE};
         border-radius: 2px;
     }}
     QToolButton#accordionHeader {{
@@ -464,13 +500,13 @@ def build_app_stylesheet() -> str:
         text-align: left;
     }}
     QToolButton#accordionHeader:checked {{
-        border-left: 3px solid {COLOR_MINT};
-        background-color: {COLOR_BG3};
+        border-left: 3px solid {COLOR_BLUE};
+        background-color: {COLOR_BG2};
         color: {COLOR_FG0};
     }}
     QToolButton#accordionHeader:hover {{
-        border-color: {COLOR_MINT_DIM};
-        background-color: {COLOR_BG3};
+        border-color: {COLOR_BLUE_DIM};
+        background-color: {COLOR_BG2};
     }}
     QSplitter::handle:vertical {{
         height: 8px;
@@ -479,7 +515,7 @@ def build_app_stylesheet() -> str:
         margin: 1px 16px;
     }}
     QSplitter::handle:vertical:hover {{
-        background-color: {COLOR_MINT};
+        background-color: {COLOR_BLUE};
     }}
     QFrame#cardSeparator {{
         background-color: {COLOR_BORDER0};
@@ -520,7 +556,7 @@ def build_app_stylesheet() -> str:
     QLabel#toast {{
         background-color: {COLOR_BG3};
         color: {COLOR_FG0};
-        border: 1px solid {COLOR_MINT_DIM};
+        border: 1px solid {COLOR_BLUE_DIM};
         border-radius: 8px;
         padding: 8px 18px;
         font-size: 10pt;
@@ -541,7 +577,7 @@ def apply_theme(app: QApplication) -> None:
     pal.setColor(QPalette.ColorRole.ButtonText, QColor(COLOR_FG1))
     pal.setColor(QPalette.ColorRole.Highlight, QColor(_SELECTION_BG))
     pal.setColor(QPalette.ColorRole.HighlightedText, QColor(COLOR_FG0))
-    pal.setColor(QPalette.ColorRole.Link, QColor(COLOR_CYAN))
+    pal.setColor(QPalette.ColorRole.Link, QColor(COLOR_BLUE))
     pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLOR_BG3))
     pal.setColor(QPalette.ColorRole.ToolTipText, QColor(COLOR_FG1))
     app.setPalette(pal)

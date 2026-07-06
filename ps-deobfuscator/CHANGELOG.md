@@ -3,6 +3,30 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.6.0 — "Veritas Blue" theme
+
+### Changed
+- New color direction based on the Claude Design "Electric cyan on cool
+  slate" mockup (VS Code / Linear adjacent): cool blue-slate surfaces
+  (`#0B0E13` / `#11151C` / `#161C26`), a single electric-blue accent
+  (`#4C9EFF`), replacing the mint "Veritas Dark" palette. Amber, red and
+  green are kept strictly for semantic status (PowerShell tokens,
+  IPs/danger, success).
+- Typography now targets Apple's system look: the UI font stack tries
+  SF Pro Display/Text, then Inter (closest free match), then Segoe UI;
+  code/data uses SF Mono → JetBrains Mono → Cascadia → Consolas.
+- Input field sits on an elevated slate surface (`#161C26`) with a
+  brighter border, matching the mockup's "paste payload" panel.
+
+### Notes
+- SF Pro / Inter are not bundled (SF Pro is licensed to Apple platforms
+  only). On a stock Windows install the UI renders in Segoe UI until
+  Inter or SF Pro is installed; bundling Inter (OFL) is a possible
+  follow-up to lock the Apple look everywhere.
+- Kept our real feature set — the mockup's illustrative-only elements
+  (byte-size/timing columns, STAGE column, mutex/registry IOC types,
+  session naming) were intentionally not copied.
+
 ## 0.5.0 — UI modernization
 
 ### Added
