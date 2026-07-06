@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
 
 from ps_deobfuscator.history import HistoryEntry, HistoryStore
 
-
 _PREVIEW_CHARS: int = 90
 
 

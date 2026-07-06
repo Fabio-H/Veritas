@@ -14,15 +14,17 @@ from __future__ import annotations
 import base64
 import binascii
 import codecs
-import io
 import gzip
+import io
+import json
 import logging
 import math
 import re
 import zlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Final, Iterable
+from datetime import datetime, timezone
+from typing import Final
 from urllib.parse import unquote_plus
 
 from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
@@ -136,7 +138,6 @@ COMMON_TLDS: Final[frozenset[str]] = frozenset(
         "corp",
         "lan",
         "home",
-        "arpa",
     }
 )
 
@@ -425,6 +426,62 @@ def has_escaped_unicode(s: str) -> bool:
     )
 
 
+_RE_HTML_ENTITY = re.compile(r"&#(x?)([0-9a-fA-F]+);")
+_RE_JWT = re.compile(r"\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\Z")
+_ASCII85_CHARS: Final[frozenset[str]] = frozenset(chr(c) for c in range(33, 118))
+
+
+def has_html_entities(s: str) -> bool:
+    return bool(_RE_HTML_ENTITY.search(s))
+
+
+def looks_like_adobe_ascii85(s: str) -> bool:
+    t = s.strip()
+    return t.startswith("<~") and t.endswith("~>") and len(t) > 4
+
+
+def looks_like_raw_ascii85(s: str) -> bool:
+    """Raw (unframed) Ascii85: full charset, long enough, and NOT plain Base64.
+
+    Requiring it to fall outside the Base64 shape keeps ordinary Base64 blobs
+    from being mistaken for Ascii85.
+    """
+    t = re.sub(r"\s+", "", s)
+    if len(t) < 16 or looks_like_base64(t):
+        return False
+    return all(c in _ASCII85_CHARS for c in t)
+
+
+def looks_like_ascii85(s: str) -> bool:
+    return looks_like_adobe_ascii85(s) or looks_like_raw_ascii85(s)
+
+
+def _b64url_decode_to_str(seg: str) -> str | None:
+    pad = "=" * ((-len(seg)) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(seg + pad)
+        return raw.decode("utf-8")
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+
+
+def looks_like_jwt(s: str) -> bool:
+    t = s.strip()
+    if not _RE_JWT.match(t):
+        return False
+    parts = t.split(".")
+    if len(parts) != 3 or len(parts[0]) < 4 or len(parts[1]) < 4:
+        return False
+    header = _b64url_decode_to_str(parts[0])
+    if header is None:
+        return False
+    try:
+        obj = json.loads(header)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(obj, dict) and ("alg" in obj or "typ" in obj)
+
+
 def can_apply_more_encoding(s: str) -> bool:
     return (
         has_url_encoding(s)
@@ -432,6 +489,9 @@ def can_apply_more_encoding(s: str) -> bool:
         or looks_like_base64(s)
         or looks_like_base32(s)
         or has_escaped_unicode(s)
+        or has_html_entities(s)
+        or looks_like_ascii85(s)
+        or looks_like_jwt(s)
     )
 
 
@@ -890,14 +950,124 @@ def embedded_powershell_base64_candidates(s: str) -> list[tuple[str, str, bool]]
     return found
 
 
+def try_html_entity_decode(s: str) -> str | None:
+    """Decode numeric HTML entities (&#65; / &#x41;) — common HTA/web obfuscation."""
+    if not has_html_entities(s):
+        return None
+
+    def repl(m: re.Match[str]) -> str:
+        is_hex = m.group(1) == "x"
+        try:
+            code = int(m.group(2), 16 if is_hex else 10)
+        except ValueError:
+            return m.group(0)
+        if 0 <= code <= 0x10FFFF:
+            try:
+                return chr(code)
+            except (ValueError, OverflowError):
+                return m.group(0)
+        return m.group(0)
+
+    dec = _RE_HTML_ENTITY.sub(repl, s)
+    return dec if dec != s else None
+
+
+def ascii85_candidates(s: str) -> list[tuple[str, str]]:
+    """Decode Ascii85/Base85 — both Adobe-framed (<~…~>) and raw."""
+    t = s.strip()
+    raw: bytes | None = None
+    if looks_like_adobe_ascii85(t):
+        try:
+            raw = base64.a85decode(t, adobe=True)
+        except (ValueError, binascii.Error):
+            raw = None
+    elif looks_like_raw_ascii85(t):
+        cleaned = re.sub(r"\s+", "", t)
+        try:
+            raw = base64.a85decode(cleaned)
+        except (ValueError, binascii.Error):
+            raw = None
+    if not raw:
+        return []
+    out: list[tuple[str, str]] = []
+    for enc_label, txt in _decode_utf8_utf16le_from_bytes(raw):
+        out.append((f"Ascii85 -> {enc_label}", txt))
+    return out
+
+
+def jwt_candidates(s: str) -> list[tuple[str, str]]:
+    """Decode a JWT into a readable header + payload JSON report."""
+    t = s.strip()
+    if not looks_like_jwt(t):
+        return []
+    parts = t.split(".")
+    header = _b64url_decode_to_str(parts[0])
+    payload = _b64url_decode_to_str(parts[1])
+    if header is None or payload is None:
+        return []
+    try:
+        h = json.dumps(json.loads(header), indent=2, ensure_ascii=False)
+        p = json.dumps(json.loads(payload), indent=2, ensure_ascii=False)
+    except (ValueError, UnicodeDecodeError):
+        return []
+    text = f"# JWT header\n{h}\n\n# JWT payload\n{p}"
+    return [("JWT decode", text)]
+
+
+_RE_JS_FROMCHARCODE = re.compile(r"fromCharCode\s*\(([^)]*)\)", re.IGNORECASE)
+_RE_PS_CHARARRAY = re.compile(r"\[char\[\]\]\s*\(([^)]*)\)", re.IGNORECASE)
+_RE_CHARCODE_NUM = re.compile(r"0x[0-9a-fA-F]+|\d+")
+
+
+def charcode_candidates(s: str) -> list[tuple[str, str]]:
+    """Decode char-code arrays: JS String.fromCharCode(...) and PS [char[]](...)."""
+    out: list[tuple[str, str]] = []
+    for label, rex in (
+        ("JS fromCharCode", _RE_JS_FROMCHARCODE),
+        ("PowerShell [char[]]", _RE_PS_CHARARRAY),
+    ):
+        matches = list(rex.finditer(s))
+        if not matches:
+            continue
+        rebuilt = s
+        changed = False
+        for m in reversed(matches):
+            tokens = _RE_CHARCODE_NUM.findall(m.group(1))
+            if len(tokens) < 4:
+                continue
+            try:
+                vals = [
+                    int(tok, 16) if tok.lower().startswith("0x") else int(tok)
+                    for tok in tokens
+                ]
+            except ValueError:
+                continue
+            if not all(0 <= v <= 0x10FFFF for v in vals):
+                continue
+            chars = "".join(chr(v) for v in vals)
+            rebuilt = rebuilt[: m.start()] + chars + rebuilt[m.end() :]
+            changed = True
+        if changed and rebuilt != s:
+            out.append((f"{label} -> text", rebuilt))
+    return out
+
+
 def type_rank(typ: str) -> int:
     if typ.startswith("EncodedCommand"):
         return 4
+    if typ.startswith("JWT"):
+        return 4
     if typ == "URL decode":
+        return 3
+    if typ == "HTML entity decode":
         return 3
     if typ.startswith("Embedded PS assignment"):
         return 3
     if typ.startswith("Base32"):
+        return 2
+    if typ.startswith("Ascii85"):
+        return 2
+    if "fromCharCode" in typ or "[char[]]" in typ:
         return 2
     if typ == "Hex -> text":
         return 2
@@ -931,10 +1101,25 @@ def pick_best_step(current: str) -> DecodeCandidate | None:
     if h is not None:
         candidates.append(DecodeCandidate("Hex -> text", h, score_text(h)))
 
+    he = try_html_entity_decode(current)
+    if he is not None:
+        candidates.append(DecodeCandidate("HTML entity decode", he, score_text(he)))
+
     for typ, txt in base64_candidates(current):
         candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
 
     for typ, txt in base32_candidates(current):
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
+
+    for typ, txt in ascii85_candidates(current):
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
+
+    for typ, txt in jwt_candidates(current):
+        # JWT output is a readable report, not further-decodable; force it
+        # through even when the score does not strictly improve.
+        candidates.append(DecodeCandidate(typ, txt, score_text(txt), force_continue=True))
+
+    for typ, txt in charcode_candidates(current):
         candidates.append(DecodeCandidate(typ, txt, score_text(txt)))
 
     for typ, txt in encodedcommand_candidates(current):
@@ -1122,7 +1307,7 @@ def iocs_as_dicts(iocs: Iterable[IocRow]) -> list[dict[str, str]]:
 
 def format_txt_report(result: DecodeResult, iocs: Iterable[IocRow]) -> str:
     ioc_rows = tuple(iocs)
-    generated_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     decode_chain_lines = ["=== Decode chain ===\n"]
     for i, layer in enumerate(result.layers, start=1):

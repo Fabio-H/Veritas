@@ -15,7 +15,6 @@ from ps_deobfuscator.engine import (
     input_anomalies,
 )
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "payloads.json"
 
 
@@ -190,6 +189,62 @@ class EngineDecodeTests(unittest.TestCase):
     def test_input_anomalies_flags_nul_bytes(self) -> None:
         notes = input_anomalies("IEX\x00 payload")
         self.assertTrue(any("NUL" in n for n in notes))
+
+    def test_decodes_html_numeric_entities(self) -> None:
+        payload = "&#73;&#69;&#88;&#32;http://example.com/a.ps1"
+        result, iocs = decode_payload(payload)
+
+        self.assertIn("IEX http://example.com/a.ps1", result.final_text)
+        self.assertTrue(any(layer.type == "HTML entity decode" for layer in result.layers))
+        self.assertTrue(any(ioc.tipo == "URL" for ioc in iocs))
+
+    def test_decodes_html_hex_entities(self) -> None:
+        payload = "&#x49;&#x45;&#x58;&#x20;http://example.com/a.ps1"
+        result, _ = decode_payload(payload)
+        self.assertIn("IEX http://example.com/a.ps1", result.final_text)
+
+    def test_decodes_adobe_ascii85(self) -> None:
+        plaintext = "IEX http://example.com/a.ps1"
+        payload = base64.a85encode(plaintext.encode("utf-8"), adobe=True).decode("ascii")
+
+        result, iocs = decode_payload(payload)
+        self.assertIn(plaintext, result.final_text)
+        self.assertTrue(any(layer.type.startswith("Ascii85") for layer in result.layers))
+        self.assertTrue(any(ioc.tipo == "URL" for ioc in iocs))
+
+    def test_decodes_jwt_into_header_and_payload(self) -> None:
+        # HS256 token: {"alg":"HS256","typ":"JWT"} / {"sub":"1234567890","name":"analyst"}
+        payload = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6ImFuYWx5c3QifQ."
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        result, _ = decode_payload(payload)
+
+        self.assertTrue(any(layer.type == "JWT decode" for layer in result.layers))
+        self.assertIn('"alg": "HS256"', result.final_text)
+        self.assertIn('"name": "analyst"', result.final_text)
+
+    def test_decodes_js_fromcharcode(self) -> None:
+        payload = "var x = String.fromCharCode(104,116,116,112,58,47,47,120,46,99,111,109)"
+        result, iocs = decode_payload(payload)
+
+        self.assertIn("http://x.com", result.final_text)
+        self.assertTrue(any("fromCharCode" in layer.type for layer in result.layers))
+
+    def test_decodes_powershell_char_array(self) -> None:
+        payload = "$s = [char[]](73,69,88,32,104,116,116,112,58,47,47,120,46,99,111,109)"
+        result, _ = decode_payload(payload)
+        self.assertIn("IEX http://x.com", result.final_text)
+
+    def test_plain_base64_is_not_mistaken_for_ascii85(self) -> None:
+        # Regression guard: an ordinary Base64 blob must not trigger Ascii85.
+        plaintext = "IEX http://example.com/a.ps1"
+        payload = base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+        result, _ = decode_payload(payload)
+
+        self.assertIn(plaintext, result.final_text)
+        self.assertFalse(any(layer.type.startswith("Ascii85") for layer in result.layers))
 
     def test_reports_decode_chain_section(self) -> None:
         result, iocs = decode_payload("SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ==")

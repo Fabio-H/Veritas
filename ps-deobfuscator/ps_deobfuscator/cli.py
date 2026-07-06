@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.console import Console
@@ -20,8 +20,8 @@ from ps_deobfuscator.engine import (
     decode_payload,
     format_txt_report,
     highlight_final,
-    layers_as_dicts,
     iocs_as_dicts,
+    layers_as_dicts,
 )
 
 console = Console(stderr=True)
@@ -210,7 +210,7 @@ def _report_metadata(layer_count: int, ioc_count: int) -> dict[str, object]:
     return {
         "app": APP_NAME,
         "version": APP_VERSION,
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "mode": "static defensive analysis",
         "layers": layer_count,
         "iocs": ioc_count,

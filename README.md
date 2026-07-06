@@ -35,8 +35,10 @@ correlação.
   palavras-chave de PowerShell malicioso + legibilidade decidem a melhor
   transformação em cada passo.
 - **Formatos suportados:** URL encoding, Hex, Base64 (UTF-8 e UTF-16LE),
-  Base32, GZIP, zlib/DEFLATE, ROT13, XOR de 1 byte (força bruta das 256
-  chaves), escapes Unicode (`\x..`, `\u....`, `%u....`),
+  Base32, Ascii85/Base85, GZIP, zlib/DEFLATE, ROT13, XOR de 1 byte (força
+  bruta das 256 chaves), escapes Unicode (`\x..`, `\u....`, `%u....`),
+  entidades HTML (`&#65;`, `&#x41;`), JWT (header + payload), arrays de
+  char-code (`String.fromCharCode(...)`, `[char[]](...)`),
   `-EncodedCommand`/`-enc` do PowerShell e Base64 embutido em atribuições de
   variável (`$x = "..."`).
 - **Extração de IOCs:** IPv4/IPv6, URLs, domínios (com heurística para não

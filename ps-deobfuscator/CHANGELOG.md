@@ -3,6 +3,35 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.7.0 — format coverage + engineering quality
+
+### Added
+- New decoders in the engine, each with conservative detection and
+  regression tests + known-good samples:
+  - **Ascii85 / Base85** (Adobe `<~…~>` framed and raw).
+  - **HTML numeric entities** (`&#65;`, `&#x41;`).
+  - **JWT** — decodes header + payload into readable JSON.
+  - **Char-code arrays** — JS `String.fromCharCode(...)` and PowerShell
+    `[char[]](...)`.
+- Continuous integration: `.github/workflows/ci.yml` runs Ruff, Mypy and
+  the unit tests on Python 3.10–3.13 for every push and PR.
+- `docs/MASTER_PLAN_V1.md`: phased roadmap to a v1.0 "complete app".
+
+### Changed
+- Tooling: Ruff (lint + import order) and Mypy (type-check of the pure
+  `ps_deobfuscator` package) configured in `pyproject.toml`; both pass
+  clean. Added to the `dev` extra.
+
+### Fixed
+- Python 3.10 compatibility: replaced `datetime.UTC` (3.11+) with
+  `datetime.timezone.utc` in engine/history/CLI, honoring the declared
+  `requires-python = ">=3.10"`. On 3.10 the app would previously fail at
+  import.
+
+### Removed
+- Dead code: `gui/main.py` (unused since the GUI entry point moved to
+  `[project.gui-scripts]` in 0.4.0).
+
 ## 0.6.0 — "Veritas Blue" theme
 
 ### Changed

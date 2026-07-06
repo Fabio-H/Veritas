@@ -18,7 +18,7 @@ import os
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +48,10 @@ class HistoryEntry:
         input_text: str,
         result: DecodeResult,
         iocs: tuple[IocRow, ...],
-    ) -> "HistoryEntry":
+    ) -> HistoryEntry:
         return cls(
             id=uuid.uuid4().hex,
-            timestamp=datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             input=input_text,
             final_text=result.final_text,
             layers=tuple(result.layers),
@@ -78,7 +78,7 @@ class HistoryEntry:
         }
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "HistoryEntry | None":
+    def from_dict(cls, raw: dict[str, Any]) -> HistoryEntry | None:
         """Build an entry from a JSON dict. Returns None if required fields are missing
         or have the wrong type; the store treats that as a corrupt record and skips it
         rather than crashing the GUI."""

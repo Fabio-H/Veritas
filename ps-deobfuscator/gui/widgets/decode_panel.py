@@ -44,23 +44,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ps_deobfuscator.engine import (
-    DecodeResult,
-    IocRow,
-    MAX_PAYLOAD_CHARS,
-    PayloadTooLargeError,
-    decode_payload,
-    format_txt_report,
-    highlight_final,
-    input_anomalies,
-    iocs_as_dicts,
-    layers_as_dicts,
-)
-from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
-from ps_deobfuscator.history import HistoryEntry
-
-from gui.widgets.flow_layout import FlowLayout
-from gui.widgets.toast import Toast
 from gui.themes import (
     COLOR_AMBER,
     COLOR_CYAN,
@@ -71,6 +54,22 @@ from gui.themes import (
     mono_font,
     ui_font,
 )
+from gui.widgets.flow_layout import FlowLayout
+from gui.widgets.toast import Toast
+from ps_deobfuscator.app_info import APP_NAME, APP_VERSION
+from ps_deobfuscator.engine import (
+    MAX_PAYLOAD_CHARS,
+    DecodeResult,
+    IocRow,
+    PayloadTooLargeError,
+    decode_payload,
+    format_txt_report,
+    highlight_final,
+    input_anomalies,
+    iocs_as_dicts,
+    layers_as_dicts,
+)
+from ps_deobfuscator.history import HistoryEntry
 
 # IOC category -> Type column color (visual triage at a glance)
 _IOC_TYPE_COLORS: dict[str, str] = {

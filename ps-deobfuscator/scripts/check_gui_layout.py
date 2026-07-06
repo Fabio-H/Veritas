@@ -31,8 +31,8 @@ sys.path.insert(0, str(_ROOT))
 # Force offscreen rendering so the script works on CI / headless environments.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -96,8 +96,6 @@ def main() -> int:
     input_edit = panel._input
     decode_btn = panel._decode_btn
     paste_btn = panel._paste_btn
-    highlight = panel._highlight
-    ioc_table = panel._ioc_table
     ioc_stack = panel._ioc_stack
     output_body_scroll = getattr(panel, "_output_body_scroll", None)
 

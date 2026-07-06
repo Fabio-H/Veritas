@@ -9,7 +9,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from main_gui import main
+from main_gui import main  # noqa: E402
 
 if __name__ == "__main__":
     main()
