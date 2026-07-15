@@ -1,59 +1,62 @@
-# Veritas — Brief do Projeto
+# Veritas — Project Brief
 
-> Este documento é o "prompt-mestre" do projeto: o que estamos construindo,
-> por quê, e como decidimos o que entra ou não. Sessões futuras de
-> desenvolvimento (humano + IA) devem partir daqui.
+> **English** · [Português](pt-BR/PROJECT_BRIEF.md)
+>
+> This document is the project's "master prompt": what we are building, why,
+> and how we decide what is in scope. Future development sessions (human + AI)
+> should start from here.
 
-## Objetivo
+## Goal
 
-Construir o **Veritas**: um desobfuscador desktop de payloads maliciosos
-(Base64, Hex, URL encoding, GZIP/zlib, XOR e camadas empilhadas) com extração
-automática de IOCs, voltado para o fluxo de trabalho real de **SOC, Incident
-Response e Blue Team**.
+Build **Veritas**: a desktop deobfuscator for malicious payloads (Base64, Hex,
+URL encoding, GZIP/zlib, XOR and stacked layers) with automatic IOC
+extraction, aimed at the real workflow of **SOC, Incident Response and Blue
+Team**.
 
-O projeto tem duas metas simultâneas:
+The project has two simultaneous goals:
 
-1. **Ferramenta real** — o analista cola um blob suspeito, o Veritas revela o
-   texto por trás e lista os indicadores (IPs, URLs, domínios, hashes,
-   comandos PowerShell suspeitos). Análise 100% estática: nada é executado.
-2. **Vitrine de portfólio (LinkedIn)** — código, UI e documentação com
-   qualidade de produto: visual profissional, testes automatizados, releases
-   versionados e README com demonstração visual.
+1. **A real tool** — the analyst pastes a suspicious blob, Veritas reveals the
+   text behind it and lists the indicators (IPs, URLs, domains, hashes,
+   suspicious PowerShell commands). 100% static analysis: nothing is executed.
+2. **A portfolio showcase (LinkedIn)** — code, UI and documentation with
+   product-level quality: professional visuals, automated tests, versioned
+   releases and a README with a visual demo.
 
-## Princípios de decisão
+## Decision principles
 
-- **Confiabilidade antes de features.** Todo payload que decodificar errado
-  vira caso de teste em `ps-deobfuscator/samples/triage/` e só sai de lá
-  quando o motor acertar. A suíte de testes nunca regride.
-- **Motor separado da interface.** `ps_deobfuscator/engine.py` não importa
-  nada de GUI; a GUI (PySide6) e a CLI são consumidores do motor.
-- **Segurança por padrão.** Payloads nunca são executados; limites de tamanho
-  e de descompressão protegem contra bombas; exports carregam metadados de
-  versão.
-- **Escopo atual: desktop Windows.** Sem versão web neste repositório.
-  Escalar (novos formatos, integrações, i18n) só depois da casa arrumada.
+- **Reliability before features.** Every payload that decodes incorrectly
+  becomes a test case under `ps-deobfuscator/samples/triage/` and only leaves
+  it once the engine gets it right. The test suite never regresses.
+- **Engine separate from interface.** `ps_deobfuscator/engine.py` imports
+  nothing from the GUI; the GUI (PySide6) and the CLI are consumers of the
+  engine.
+- **Safety by default.** Payloads are never executed; size and decompression
+  limits protect against bombs; exports carry version metadata.
+- **Current scope: Windows desktop.** No web version in this repository.
+  Scaling (new formats, integrations, i18n) comes only after the house is in
+  order.
 
-## Estado atual e prioridades
+## Current state and priorities
 
-| # | Prioridade | Status |
-|---|-----------|--------|
-| 1 | Ambiente reproduzível (Python + deps + testes verdes) | ✅ |
-| 2 | Histórico commitado e repositório organizado | ✅ |
-| 3 | Biblioteca de payloads de teste (`samples/`) para reproduzir erros de decodificação | ✅ |
-| 4 | Redesign da UI: tema escuro profissional, layout responsivo, cara de produto | 🔨 em andamento |
-| 5 | Corrigir payloads Base64 que decodificam errado (1º caso corrigido em v0.3.1; novos casos → `samples/triage/`) | ✅ |
-| 6 | CI (GitHub Actions) + screenshots/GIF no README + release `.zip` | ⏳ |
+| # | Priority | Status |
+|---|----------|--------|
+| 1 | Reproducible environment (Python + deps + green tests) | ✅ |
+| 2 | History committed and repository organized | ✅ |
+| 3 | Test payload library (`samples/`) to reproduce decode errors | ✅ |
+| 4 | UI redesign: professional dark theme, responsive layout, product feel | ✅ |
+| 5 | Fix Base64 payloads that decode incorrectly (1st case fixed in v0.3.1; new cases → `samples/triage/`) | ✅ |
+| 6 | CI (GitHub Actions) + automated release `.zip` | ✅ |
+| 7 | Screenshots / GIF in the README | ⏳ |
 
-## Texto "About" do GitHub (máx. 100 caracteres)
+## GitHub "About" text (max 100 characters)
 
-- PT: `Desobfuscador de payloads para Blue Team: decodificação recursiva e extração de IOCs no desktop.`
-- EN: `Payload deobfuscator for Blue Team: recursive decoding & IOC extraction, desktop app.`
+`Payload deobfuscator for Blue Team: recursive decoding & IOC extraction, desktop app.`
 
-## Como reproduzir um erro de decodificação
+## How to reproduce a decode error
 
-1. Salve o payload problemático em um `.txt` dentro de
-   `ps-deobfuscator/samples/triage/` (um payload por arquivo).
-2. Rode `python scripts/run_samples.py` — o script imprime a cadeia de
-   decodificação completa de cada amostra.
-3. Descreva qual era a saída esperada; o caso vira fixture de teste e a
-   correção entra no motor.
+1. Save the problematic payload as a `.txt` under
+   `ps-deobfuscator/samples/triage/` (one payload per file).
+2. Run `python scripts/run_samples.py` — the script prints the full decode
+   chain of each sample.
+3. Describe what the expected output was; the case becomes a test fixture and
+   the fix lands in the engine.

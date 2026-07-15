@@ -1,80 +1,83 @@
-# Veritas — Master Plan para a v1.0 ("aplicativo completo")
+# Veritas — Master Plan for v1.0 ("complete app")
 
-> Este é o prompt-mestre detalhado que orienta a evolução do Veritas de um
-> protótipo bem-feito (v0.6.0) para um produto de portfólio completo (v1.0).
-> Cada fase é independente, versionada, com testes verdes + layout check +
-> screenshot antes de commitar. Nada de reescrever o que já funciona — o
-> motor, os testes e a GUI são a fundação; nós construímos por cima.
+> **English** · [Português](pt-BR/MASTER_PLAN_V1.md)
+>
+> This is the detailed master prompt guiding Veritas from a well-built
+> prototype (v0.6.0) to a complete portfolio product (v1.0). Each phase is
+> independent, versioned, with green tests + layout check + screenshot before
+> committing. No rewriting what already works — the engine, the tests and the
+> GUI are the foundation; we build on top.
 
-## Contexto para a IA executora
+## Context for the executing AI
 
-Veritas é um desobfuscador desktop (Python 3.10+ / PySide6) para análise
-defensiva de payloads (SOC / IR / Blue Team). Motor 100% desacoplado da
-interface (`ps_deobfuscator/engine.py` não importa nada de GUI). Objetivo
-duplo: ferramenta real **e** vitrine de portfólio para LinkedIn. Princípios
-inegociáveis: análise estática (nunca executar payload), confiabilidade antes
-de features (todo decode errado vira teste de regressão), motor separado da
-interface, tudo em inglês na UI.
+Veritas is a desktop deobfuscator (Python 3.10+ / PySide6) for defensive
+payload analysis (SOC / IR / Blue Team). The engine is 100% decoupled from the
+interface (`ps_deobfuscator/engine.py` imports nothing from the GUI). Dual
+goal: a real tool **and** a LinkedIn portfolio showcase. Non-negotiable
+principles: static analysis (never execute a payload), reliability before
+features (every wrong decode becomes a regression test), engine separate from
+interface, everything in English in the UI.
 
-## Diagnóstico (base da pesquisa 2026 + auditoria do código)
+## Diagnosis (from 2026 research + code audit)
 
-Forças: separação motor/GUI/CLI real; `pyproject.toml` moderno; 32 testes;
-empacotamento PyInstaller windowed funcional. Lacunas encontradas:
+Strengths: real engine/GUI/CLI separation; modern `pyproject.toml`; 32 tests;
+working windowed PyInstaller packaging. Gaps found:
 
-1. Trabalho não publicado no GitHub (8 commits à frente do origin).
-2. Sem CI, sem linter, sem type-checker.
-3. Código morto (`gui/main.py`).
-4. Como "desobfuscador", faltam formatos comuns em malware real e o modo
-   **manual/guiado** (hoje só há heurística automática).
-5. Sem screenshots/demo no README.
+1. Work not published to GitHub (8 commits ahead of origin).
+2. No CI, no linter, no type-checker.
+3. Dead code (`gui/main.py`).
+4. As a "deobfuscator", missing formats common in real malware and the
+   **manual/guided** mode (only the automatic heuristic existed).
+5. No screenshots/demo in the README.
 
-## Fases
+## Phases
 
-### Fase 1 — Qualidade e publicação (fundação de credibilidade) — v0.7.0
-- [x] Remover código morto (`gui/main.py`).
-- [x] `ruff` (lint + import sort) configurado e limpo.
-- [x] `mypy` no pacote `ps_deobfuscator` (lógica pura) sem erros.
-- [x] GitHub Actions: matriz de Python, roda ruff + mypy + os testes a cada push.
-- [ ] Push do repositório (ação do dono — publica identidade pública).
-- [ ] Screenshots renderizados no README + narrativa "por quê" (workflow Blue Team).
+### Phase 1 — Quality and publishing (credibility foundation) — v0.7.0
+- [x] Remove dead code (`gui/main.py`).
+- [x] `ruff` (lint + import sort) configured and clean.
+- [x] `mypy` on the `ps_deobfuscator` package (pure logic) with no errors.
+- [x] GitHub Actions: Python matrix, runs ruff + mypy + tests on every push.
+- [x] Push the repository (owner action — publishes public identity).
+- [ ] Rendered screenshots in the README + a "why" narrative (Blue Team workflow).
 
-### Fase 2 — Cobertura de formatos (identidade de "desobfuscador") — v0.7.0
-Adicionar decodificadores comuns em malware real, cada um com detecção
-conservadora (baixo falso-positivo) e testes:
-- [x] **Ascii85 / Base85** (Adobe `<~…~>` e raw).
-- [x] **Entidades HTML** (`&#65;`, `&#x41;`) — ofuscação web/HTA.
-- [x] **JWT** — decodifica header+payload como JSON (alto valor visual, baixo falso-positivo).
-- [x] **Arrays de char-code** — `String.fromCharCode(...)` (JS) e `[char[]](...)` (PowerShell).
-- [ ] Decimal/octal puro e VBScript `Chr()+concat` (fase futura; risco de falso-positivo maior).
+### Phase 2 — Format coverage ("deobfuscator" identity) — v0.7.0
+Add decoders common in real malware, each with conservative detection (low
+false-positive) and tests:
+- [x] **Ascii85 / Base85** (Adobe `<~…~>` and raw).
+- [x] **HTML entities** (`&#65;`, `&#x41;`) — web/HTA obfuscation.
+- [x] **JWT** — decodes header+payload as JSON (high visual value, low false-positive).
+- [x] **Char-code arrays** — `String.fromCharCode(...)` (JS) and `[char[]](...)` (PowerShell).
+- [ ] Plain decimal/octal and VBScript `Chr()+concat` (later phase; higher false-positive risk).
 
-### Fase 3 — Decodificação manual/guiada (o maior diferencial) — v0.8.0 ✅
-Resolve de raiz a classe de bug "a heurística escolheu errado":
-- [x] Nova API no motor: `apply_operation(text, op)` (aplica UMA transformação
-  incondicionalmente) e `decode_with_ops(text, [ops])` (pipeline manual),
-  sem depender de score. Reusa os decodificadores existentes.
-- [x] GUI: página "Manual Pipeline" onde o analista encadeia operações
+### Phase 3 — Manual/guided decoding (the biggest differentiator) — v0.8.0 ✅
+Fixes the "the heuristic picked wrong" class of bug at the root:
+- [x] New engine API: `apply_operation(text, op)` (applies ONE transformation
+  unconditionally) and `decode_with_ops(text, [ops])` (manual pipeline),
+  without depending on the score. Reuses the existing decoders.
+- [x] GUI: "Manual Pipeline" page where the analyst chains operations
   (dropdown: URL, Hex, Base64 UTF-8/UTF-16LE, Base32, Ascii85, HTML entity,
-  Unicode escapes, ROT13, XOR key, reverse, remove whitespace) e vê o
-  resultado camada a camada — inspirado no "recipe" do CyberChef, mas enxuto.
-- [ ] Exportar a receita / passos byte-level (GZIP no recipe) — fase futura.
+  Unicode escapes, ROT13, XOR key, reverse, remove whitespace) and sees the
+  result layer by layer — inspired by CyberChef's "recipe", but lean.
+- [ ] Export the recipe / byte-level steps (GZIP in the recipe) — later phase.
 
-### Fase 4 — Integração Blue Team / entregáveis — v0.9.0
-- Exportação **STIX 2.1** e **MISP** dos IOCs (padrão de fato para sharing).
-- Modo **batch** visível na GUI (já existe na CLI): soltar vários arquivos,
-  decodificar todos, exportar relatório consolidado.
-- "Defanging"/"refanging" de IOCs (`hxxp://`, `1.2.3[.]4`) — convenção de IR.
+### Phase 4 — Blue Team integration / deliverables — v0.9.0
+- **STIX 2.1** and **MISP** export of the IOCs (de-facto standard for sharing).
+- **Batch** mode surfaced in the GUI (already in the CLI): drop several files,
+  decode them all, export a consolidated report.
+- IOC "defanging"/"refanging" (`hxxp://`, `1.2.3[.]4`) — an IR convention.
 
-### Fase 5 — Produto e distribuição — v1.0.0
-- Empacotar fonte **Inter** (OFL) para travar o visual Apple em qualquer máquina.
-- Instalador Windows (Inno Setup) com atalho no Menu Iniciar.
-- Memória de janela já feita (v0.5.0); revisar escala high-DPI.
-- README final com GIF de demonstração, badges de CI, seção de arquitetura.
+### Phase 5 — Product and distribution — v1.0.0
+- Bundle the **Inter** font (OFL) to lock the intended look on any machine.
+- Windows installer (Inno Setup) with a Start Menu shortcut.
+- Window memory already done (v0.5.0); revisit high-DPI scaling.
+- Final README with a demo GIF, CI badges, architecture section.
 
-## Regras de execução (para qualquer sessão)
-1. Uma fase por vez; nunca quebrar testes existentes.
-2. Todo decode incorreto reportado → fixture de regressão antes da correção.
-3. Detecção de formato sempre conservadora; o scoring + o guard de
-   "legível→ilegível só se melhora" (v0.3.1) protegem contra falso-positivo.
-4. Verificar sempre: `unittest` + `scripts/check_gui_layout.py` + screenshot.
-5. Versionar (`app_info.py` + `pyproject.toml`), atualizar `CHANGELOG.md`,
-   commit descritivo.
+## Execution rules (for any session)
+1. One phase at a time; never break existing tests.
+2. Every reported incorrect decode → regression fixture before the fix.
+3. Format detection always conservative; the scoring + the
+   "readable→unreadable only if the score improves" guard (v0.3.1) protect
+   against false positives.
+4. Always verify: `unittest` + `scripts/check_gui_layout.py` + screenshot.
+5. Version (`app_info.py` + `pyproject.toml`), update `CHANGELOG.md`,
+   descriptive commit.
