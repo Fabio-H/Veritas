@@ -41,7 +41,7 @@ where = ["."]
 include = ["ps_deobfuscator*", "gui*"]
 
 [tool.setuptools.package-data]
-gui = ["resources/*.svg", "resources/*.ico"]
+gui = ["resources/*.svg", "resources/*.ico", "resources/fonts/*.ttf", "resources/fonts/*.txt"]
 
 [tool.ruff]
 line-length = 100

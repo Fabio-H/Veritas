@@ -12,7 +12,10 @@ Segoe UI on Windows. Fusion + QPalette + global QSS.
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QFont, QPalette
+import sys
+from pathlib import Path
+
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
 # Surfaces (cool blue-slate)
@@ -105,6 +108,40 @@ _MONO_FAMILIES = [
     "Consolas",
     "monospace",
 ]
+
+
+_FONTS_LOADED = False
+
+
+def _fonts_dir() -> Path:
+    """Directory holding the bundled Inter .ttf files (dev and frozen)."""
+    here = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled = Path(meipass) / "gui" / "resources" / "fonts"
+            if bundled.is_dir():
+                return bundled
+    return here / "resources" / "fonts"
+
+
+def load_bundled_fonts() -> None:
+    """Register the bundled Inter families with Qt.
+
+    Inter (SIL Open Font License) is shipped inside the app so the UI renders
+    with the intended typography even on a clean Windows machine where Inter
+    is not installed. SF Pro is deliberately NOT bundled (proprietary, Apple
+    platforms only); it stays first in the fallback stack for systems that
+    already have it. Idempotent; requires a running QApplication.
+    """
+    global _FONTS_LOADED
+    if _FONTS_LOADED:
+        return
+    fonts = _fonts_dir()
+    if fonts.is_dir():
+        for ttf in sorted(fonts.glob("*.ttf")):
+            QFontDatabase.addApplicationFont(str(ttf))
+    _FONTS_LOADED = True
 
 
 def mono_font(point_size: int = 12) -> QFont:
@@ -566,6 +603,7 @@ def build_app_stylesheet() -> str:
 
 
 def apply_theme(app: QApplication) -> None:
+    load_bundled_fonts()
     app.setStyle("Fusion")
     pal = QPalette()
     pal.setColor(QPalette.ColorRole.Window, QColor(COLOR_BG0))

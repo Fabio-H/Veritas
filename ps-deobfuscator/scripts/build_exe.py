@@ -53,6 +53,8 @@ def main() -> int:
         return r.returncode
 
     print("[4/5] PyInstaller ...")
+    # Bundles the whole gui/resources tree, including resources/fonts/*.ttf
+    # (Inter), so the embedded typography ships inside the .exe.
     add_data = (
         "gui/resources;gui/resources"
         if sys.platform == "win32"
