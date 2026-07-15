@@ -31,6 +31,7 @@ from gui.app_icon import load_application_icon
 from gui.themes import COLOR_BORDER0, COLOR_GREEN_BRIGHT
 from gui.widgets.decode_panel import DecodePanel
 from gui.widgets.history_panel import HistoryPanel
+from gui.widgets.manual_panel import ManualPanel
 from ps_deobfuscator.app_info import APP_DESCRIPTION, APP_NAME, APP_PACKAGE, APP_VERSION
 from ps_deobfuscator.engine import DecodeResult, IocRow
 from ps_deobfuscator.history import HistoryEntry, HistoryStore, default_history_path
@@ -80,8 +81,10 @@ class MainWindow(QMainWindow):
 
         self._stack = QStackedWidget()
         self._decode_panel = DecodePanel()
+        self._manual_panel = ManualPanel()
         self._history_panel = HistoryPanel(self._history_store)
         self._stack.addWidget(self._decode_panel)
+        self._stack.addWidget(self._manual_panel)
         self._stack.addWidget(self._history_panel)
         layout.addWidget(self._stack, stretch=1)
 
@@ -154,6 +157,11 @@ class MainWindow(QMainWindow):
         self._nav_decode.clicked.connect(self._show_decode)
         v.addWidget(self._nav_decode)
 
+        self._nav_manual = self._make_nav_button("  Manual Pipeline", active=False)
+        self._nav_manual.setToolTip("Build a decode recipe by hand")
+        self._nav_manual.clicked.connect(self._show_manual)
+        v.addWidget(self._nav_manual)
+
         self._nav_history = self._make_nav_button("  History", active=False)
         self._nav_history.setToolTip("Session history")
         self._nav_history.clicked.connect(self._show_history)
@@ -198,7 +206,7 @@ class MainWindow(QMainWindow):
 
     def _set_nav_active(self, active: QPushButton) -> None:
         """Swap object names and re-polish so QSS rules for navActive/navInactive apply."""
-        for btn in (self._nav_decode, self._nav_history):
+        for btn in (self._nav_decode, self._nav_manual, self._nav_history):
             target = "navActive" if btn is active else "navInactive"
             if btn.objectName() != target:
                 btn.setObjectName(target)
@@ -224,6 +232,10 @@ class MainWindow(QMainWindow):
     def _show_decode(self) -> None:
         self._fade_to(self._decode_panel)
         self._set_nav_active(self._nav_decode)
+
+    def _show_manual(self) -> None:
+        self._fade_to(self._manual_panel)
+        self._set_nav_active(self._nav_manual)
 
     def _show_history(self) -> None:
         self._history_panel.refresh()
@@ -297,6 +309,7 @@ class MainWindow(QMainWindow):
             self._collapse_btn.setToolTip("Expand sidebar")
             self._brand_title.setText("V")
             self._nav_decode.setText(" ◈ ")
+            self._nav_manual.setText(" ⚙ ")
             self._nav_history.setText(" ◷ ")
             for w in (self._brand_sub, self._disc, self._nav_lbl, self._foot, self._ver):
                 w.setVisible(False)
@@ -305,6 +318,7 @@ class MainWindow(QMainWindow):
             self._collapse_btn.setToolTip("Collapse sidebar")
             self._brand_title.setText(APP_NAME)
             self._nav_decode.setText("  Quick Decode")
+            self._nav_manual.setText("  Manual Pipeline")
             self._nav_history.setText("  History")
             for w in (self._brand_sub, self._disc, self._nav_lbl, self._foot, self._ver):
                 w.setVisible(True)

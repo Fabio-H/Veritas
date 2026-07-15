@@ -3,6 +3,28 @@
 All notable changes to Veritas (ps-deobfuscator) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.8.0 — manual / guided decoding pipeline
+
+### Added
+- **Manual Pipeline** (new sidebar page): the analyst builds a decode
+  recipe by hand — pick an operation, add it as a step, reorder/remove,
+  then Run — overriding the automatic heuristic. Directly answers the
+  "the auto decoder picked the wrong branch" problem (e.g. XOR winning
+  over the intended Base64).
+- Engine manual API (pure, fully tested): `apply_operation(text, op_id,
+  key=…)` applies a single transform unconditionally; `run_manual_pipeline`
+  / `decode_with_ops` run an ordered recipe and record each step as a
+  layer (including "(not applicable)" markers). Operations: URL, Hex,
+  Base64 (UTF-8 / UTF-16LE), Base32, Ascii85, HTML entities, Unicode
+  escapes, ROT13, XOR (byte key), reverse, remove whitespace.
+- Output mirrors Quick Decode: pipeline layers, highlighted result stream,
+  and IOC table.
+
+### Notes
+- Manual operations are text→text (no bytes-only steps like GZIP in the
+  recipe yet); the automatic engine still handles compression. Byte-level
+  recipe steps are a candidate for a later phase.
+
 ## 0.7.0 — format coverage + engineering quality
 
 ### Added

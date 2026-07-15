@@ -1297,6 +1297,141 @@ def decode_payload(raw: str) -> tuple[DecodeResult, tuple[IocRow, ...]]:
     return result, iocs
 
 
+# ---------------------------------------------------------------------------
+# Manual / guided decoding (analyst drives the pipeline, not the heuristic)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ManualOp:
+    """One transformation the analyst can apply by hand in the manual pipeline."""
+
+    op_id: str
+    label: str
+    needs_key: bool = False
+
+
+# Order here is the order shown in the GUI dropdown.
+MANUAL_OPS: Final[tuple[ManualOp, ...]] = (
+    ManualOp("url", "URL decode"),
+    ManualOp("hex", "Hex -> text"),
+    ManualOp("base64_utf8", "Base64 -> UTF-8"),
+    ManualOp("base64_utf16le", "Base64 -> UTF-16LE"),
+    ManualOp("base32", "Base32 -> UTF-8"),
+    ManualOp("ascii85", "Ascii85 -> UTF-8"),
+    ManualOp("html_entities", "HTML entities -> text"),
+    ManualOp("unicode_escapes", "Unicode escapes -> text"),
+    ManualOp("rot13", "ROT13"),
+    ManualOp("xor", "XOR (byte key)", needs_key=True),
+    ManualOp("reverse", "Reverse string"),
+    ManualOp("remove_ws", "Remove whitespace"),
+)
+
+_MANUAL_OP_BY_ID: Final[dict[str, ManualOp]] = {op.op_id: op for op in MANUAL_OPS}
+
+
+def manual_op_label(op_id: str) -> str:
+    op = _MANUAL_OP_BY_ID.get(op_id)
+    return op.label if op else op_id
+
+
+def _op_base64(text: str, encoding: str) -> str | None:
+    t = normalize_base64_string(text)
+    if not looks_like_base64(t):
+        return None
+    try:
+        raw = base64.b64decode(t)
+    except (binascii.Error, ValueError):
+        return None
+    return raw.decode(encoding, errors="replace")
+
+
+def _op_base32(text: str) -> str | None:
+    if not looks_like_base32(text):
+        return None
+    try:
+        raw = base64.b32decode(normalize_base32_string(text), casefold=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw.decode("utf-8", errors="replace")
+
+
+def apply_operation(text: str, op_id: str, *, key: int | None = None) -> str | None:
+    """Apply a single transformation unconditionally (analyst's choice).
+
+    Unlike the automatic engine, this never consults the heuristic score: if
+    the analyst picks Base64, we decode as Base64. Returns None when the
+    operation cannot apply to the given text (e.g. Base64 on non-Base64, or
+    XOR without a key), so the caller can surface a "not applicable" state.
+    """
+    if op_id == "url":
+        return unquote_plus(text.replace("+", "%20"))
+    if op_id == "hex":
+        return try_hex_decode(text)
+    if op_id == "base64_utf8":
+        return _op_base64(text, "utf-8")
+    if op_id == "base64_utf16le":
+        return _op_base64(text, "utf-16-le")
+    if op_id == "base32":
+        return _op_base32(text)
+    if op_id == "ascii85":
+        cands = ascii85_candidates(text)
+        return next((txt for typ, txt in cands if typ.endswith("UTF-8")), None)
+    if op_id == "html_entities":
+        return try_html_entity_decode(text)
+    if op_id == "unicode_escapes":
+        decoded = try_unicode_escape_decode(text)
+        return decoded[1] if decoded is not None else None
+    if op_id == "rot13":
+        return text.translate(
+            str.maketrans(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+                "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
+            )
+        )
+    if op_id == "xor":
+        if key is None or not (0 <= key <= 255):
+            return None
+        raw = text.encode("latin-1", errors="replace")
+        return bytes(b ^ key for b in raw).decode("utf-8", errors="replace")
+    if op_id == "reverse":
+        return text[::-1]
+    if op_id == "remove_ws":
+        return re.sub(r"\s+", "", text)
+    return None
+
+
+def run_manual_pipeline(text: str, steps: Iterable[tuple[str, int | None]]) -> DecodeResult:
+    """Apply an ordered list of (op_id, key) steps, recording each as a layer.
+
+    A step that cannot apply is recorded as a "(not applicable)" layer and the
+    text carries through unchanged, so the analyst sees exactly what happened.
+    """
+    validate_payload_size(text)
+    current = strip_null_bytes(text)
+    layers: list[DecodeLayer] = [DecodeLayer("Raw input", current)]
+    for op_id, key in steps:
+        label = manual_op_label(op_id)
+        if key is not None and _MANUAL_OP_BY_ID.get(op_id, ManualOp("", "")).needs_key:
+            label = f"{label} 0x{key:02X}"
+        out = apply_operation(current, op_id, key=key)
+        if out is None:
+            layers.append(DecodeLayer(f"{label} (not applicable)", current))
+            continue
+        current = out
+        layers.append(DecodeLayer(label, current))
+    return DecodeResult(layers=tuple(layers), final_text=current)
+
+
+def decode_with_ops(
+    text: str, steps: Iterable[tuple[str, int | None]]
+) -> tuple[DecodeResult, tuple[IocRow, ...]]:
+    """Manual pipeline + IOC extraction, mirroring decode_payload's return shape."""
+    result = run_manual_pipeline(text, steps)
+    iocs = extract_iocs(result.final_text)
+    return result, iocs
+
+
 def layers_as_dicts(result: DecodeResult) -> list[dict[str, str]]:
     return [{"type": layer.type, "text": layer.text} for layer in result.layers]
 

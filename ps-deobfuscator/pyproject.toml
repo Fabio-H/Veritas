@@ -1,6 +1,6 @@
 [project]
 name = "ps-deobfuscator"
-version = "0.7.0"
+version = "0.8.0"
 description = "Recursive payload deobfuscator (URL, Hex, Base64, Base32, Ascii85, GZIP, JWT, char-codes) with IOC extraction"
 readme = "README.md"
 requires-python = ">=3.10"

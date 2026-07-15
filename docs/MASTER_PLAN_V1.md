@@ -47,16 +47,16 @@ conservadora (baixo falso-positivo) e testes:
 - [x] **Arrays de char-code** — `String.fromCharCode(...)` (JS) e `[char[]](...)` (PowerShell).
 - [ ] Decimal/octal puro e VBScript `Chr()+concat` (fase futura; risco de falso-positivo maior).
 
-### Fase 3 — Decodificação manual/guiada (o maior diferencial) — v0.8.0
+### Fase 3 — Decodificação manual/guiada (o maior diferencial) — v0.8.0 ✅
 Resolve de raiz a classe de bug "a heurística escolheu errado":
-- Nova API no motor: `apply_operation(text, op)` (aplica UMA transformação
+- [x] Nova API no motor: `apply_operation(text, op)` (aplica UMA transformação
   incondicionalmente) e `decode_with_ops(text, [ops])` (pipeline manual),
   sem depender de score. Reusa os decodificadores existentes.
-- GUI: ao lado da cadeia automática, um modo "Manual" onde o analista
-  encadeia operações (dropdown de operações: URL, Hex, Base64, Base32,
-  Ascii85, GZIP, XOR key, ROT-N, HTML entity, …) e vê o resultado camada a
-  camada — inspirado no "recipe" do CyberChef, mas enxuto.
-- Toda operação manual é reversível/re-editável; exportável como "receita".
+- [x] GUI: página "Manual Pipeline" onde o analista encadeia operações
+  (dropdown: URL, Hex, Base64 UTF-8/UTF-16LE, Base32, Ascii85, HTML entity,
+  Unicode escapes, ROT13, XOR key, reverse, remove whitespace) e vê o
+  resultado camada a camada — inspirado no "recipe" do CyberChef, mas enxuto.
+- [ ] Exportar a receita / passos byte-level (GZIP no recipe) — fase futura.
 
 ### Fase 4 — Integração Blue Team / entregáveis — v0.9.0
 - Exportação **STIX 2.1** e **MISP** dos IOCs (padrão de fato para sharing).

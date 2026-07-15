@@ -8,11 +8,14 @@ from pathlib import Path
 from ps_deobfuscator.engine import (
     MAX_PAYLOAD_CHARS,
     PayloadTooLargeError,
+    apply_operation,
     decode_payload,
+    decode_with_ops,
     extract_iocs,
     format_txt_report,
     highlight_final,
     input_anomalies,
+    run_manual_pipeline,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "payloads.json"
@@ -245,6 +248,54 @@ class EngineDecodeTests(unittest.TestCase):
 
         self.assertIn(plaintext, result.final_text)
         self.assertFalse(any(layer.type.startswith("Ascii85") for layer in result.layers))
+
+    def test_manual_apply_operation_base64_forces_encoding(self) -> None:
+        # UTF-16LE payload: manual UTF-8 gives mojibake, manual UTF-16LE gives text.
+        payload = "SQBFAFgAIABoAGkA"  # "IEX hi" in UTF-16LE base64
+        as_utf8 = apply_operation(payload, "base64_utf8")
+        as_utf16 = apply_operation(payload, "base64_utf16le")
+
+        self.assertEqual(as_utf16, "IEX hi")
+        self.assertNotEqual(as_utf8, "IEX hi")
+
+    def test_manual_apply_operation_returns_none_when_not_applicable(self) -> None:
+        self.assertIsNone(apply_operation("not base64 !!!", "base64_utf8"))
+        self.assertIsNone(apply_operation("anything", "xor", key=None))
+
+    def test_manual_apply_operation_xor_with_key(self) -> None:
+        plaintext = "IEX hello"
+        xored = "".join(chr(ord(c) ^ 0x2A) for c in plaintext)
+        self.assertEqual(apply_operation(xored, "xor", key=0x2A), plaintext)
+
+    def test_manual_apply_operation_reverse_and_rot13(self) -> None:
+        self.assertEqual(apply_operation("abc", "reverse"), "cba")
+        self.assertEqual(apply_operation("IEX", "rot13"), "VRK")
+
+    def test_manual_pipeline_chains_steps_and_records_layers(self) -> None:
+        # Base64 of a ROT13'd string: analyst does Base64 then ROT13 by hand.
+        import base64 as _b64
+
+        original = "IEX http://example.com/a.ps1"
+        rot = original.translate(
+            str.maketrans(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+                "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
+            )
+        )
+        payload = _b64.b64encode(rot.encode("utf-8")).decode("ascii")
+
+        result, iocs = decode_with_ops(
+            payload, [("base64_utf8", None), ("rot13", None)]
+        )
+
+        self.assertEqual(result.final_text, original)
+        self.assertEqual(len(result.layers), 3)  # raw + 2 ops
+        self.assertTrue(any(ioc.tipo == "URL" for ioc in iocs))
+
+    def test_manual_pipeline_marks_not_applicable_step(self) -> None:
+        result = run_manual_pipeline("plain text", [("base64_utf8", None)])
+        self.assertEqual(result.final_text, "plain text")
+        self.assertTrue(result.layers[-1].type.endswith("(not applicable)"))
 
     def test_reports_decode_chain_section(self) -> None:
         result, iocs = decode_payload("SUVYIGh0dHA6Ly9leGFtcGxlLmNvbS9hLnBzMQ==")
