@@ -11,10 +11,13 @@ dados para lugar nenhum.
 O nome é um trocadilho com a ideia de extrair a **verdade** do que o atacante
 tentou esconder.
 
-![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
+[![Download latest release](https://img.shields.io/github/v/release/Fabio-H/Veritas?label=download&logo=github)](https://github.com/Fabio-H/Veritas/releases/latest)
+[![CI](https://github.com/Fabio-H/Veritas/actions/workflows/ci.yml/badge.svg)](https://github.com/Fabio-H/Veritas/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6%20(Qt%206)-41CD52?logo=qt&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-26%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+
+**[⬇ Download the latest Windows build](https://github.com/Fabio-H/Veritas/releases/latest)**
 
 <!-- TODO: screenshot/GIF da UI redesenhada aqui -->
 

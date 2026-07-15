@@ -1,0 +1,46 @@
+name: Release
+
+# Build the Windows bundle and attach it to a GitHub Release whenever a
+# semver tag is pushed (e.g. `git tag v0.8.0 && git push origin v0.8.0`).
+# This is additive: the CI workflow (ci.yml) is unchanged.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write  # required to create the Release and upload assets
+
+jobs:
+  build-windows:
+    name: Build Windows bundle and publish release
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: ps-deobfuscator
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project (gui + dev + build)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui,dev,build]"
+
+      - name: Build Windows bundle (PyInstaller)
+        run: python scripts/build_exe.py
+
+      - name: Publish GitHub Release with the bundle
+        uses: softprops/action-gh-release@v2
+        with:
+          # One-folder PyInstaller build: the .exe needs its _internal/ folder,
+          # so the distributable asset is the versioned zip produced by
+          # scripts/build_exe.py in the repo-root release/ directory.
+          files: release/Veritas-*-windows.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
